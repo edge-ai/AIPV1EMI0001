@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>YOLOv7 Object Counts</title>
+    <meta name="description" content="Live AIPV1EMI0001 object-counting dashboard">
+    <link rel="stylesheet" href="./index.css">
+    <script type="module" async src="./index.js"></script>
+</head>
+<body>
+    <!--
+      THESIS: A live control-room viewport where video and counts are read together; it refuses a grid of interchangeable KPI cards.
+      OWN-WORLD: Deep navy instrumentation panels, hairline steel borders, cyan live-state accents, and compact tabular telemetry.
+      STORY: Confirm the pipeline is live, read object volume by class, then inspect ROI and crossing counts without leaving the stream.
+      FIRST VIEWPORT: Identity and connection state above a dominant 16:9 feed with a dense count console fixed beside it.
+      FORM: Split-screen operations console, user-pinned direction; seed: user-pinned.
+    -->
+    <div id="app">
+        <header class="header">
+            <div>
+                <div class="title-line">
+                    <h1>Object counting</h1>
+                    <span class="product-code">AIPV1EMI0001</span>
+                </div>
+                <p class="subtitle">{{ pipelineLabel }}</p>
+            </div>
+            <div class="connection">
+                <span class="status-dot" :class="{ online: connected }"></span>
+                <span>{{ connected ? "Live" : "Disconnected" }}</span>
+                <time>{{ lastUpdateLabel }}</time>
+            </div>
+        </header>
+
+        <main>
+            <section class="toolbar">
+                <label>
+                    Metrics scope
+                    <select v-model="selectedSource">
+                        <option value="all">All sources</option>
+                        <option v-for="source in sources" :key="source.id" :value="source.id">
+                            {{ source.name }}
+                        </option>
+                    </select>
+                </label>
+                <span class="hint">{{ aggregation }}</span>
+            </section>
+
+            <section class="hero-grid">
+                <article class="video-card">
+                    <div class="card-heading">
+                        <h2>Live pipeline</h2>
+                        <span class="pill" :class="'video-' + videoState">{{ videoState }}</span>
+                    </div>
+                    <div class="video-frame">
+                        <video v-if="hlsUrl" ref="video" muted autoplay playsinline controls></video>
+                        <div v-else class="empty">Waiting for a pipeline identifier.</div>
+                    </div>
+                </article>
+
+                <article class="counter-panel">
+                    <div class="counter-heading">
+                        <h2>Current counts</h2>
+                        <span>{{ selectedSource === "all" ? sources.length + " sources" : selectedSourceName }}</span>
+                    </div>
+                    <div class="total-row">
+                        <span>All objects</span>
+                        <strong>{{ scopedTotal }}</strong>
+                    </div>
+                    <div class="class-list" aria-label="Object counts by class">
+                        <div v-for="item in classCards" :key="item.label" class="class-row">
+                            <span class="class-name">
+                                <i :class="'class-' + item.label"></i>
+                                {{ item.label }}
+                            </span>
+                            <strong>{{ item.value }}</strong>
+                        </div>
+                    </div>
+                </article>
+            </section>
+
+            <section class="detail-grid">
+                <article class="detail-card">
+                    <div class="card-heading">
+                        <h2>Regions of interest</h2>
+                    </div>
+                    <div v-if="roiRows.length" class="rows">
+                        <div v-for="row in roiRows" :key="row.label" class="count-row">
+                            <span>{{ row.label }}</span><strong>{{ row.value }}</strong>
+                        </div>
+                    </div>
+                    <div v-else class="empty compact">No ROI is defined for this pipeline.</div>
+                </article>
+
+                <article class="detail-card">
+                    <div class="card-heading">
+                        <h2>Line crossings</h2>
+                    </div>
+                    <div v-if="lineRows.length" class="rows">
+                        <div v-for="row in lineRows" :key="row.label" class="count-row">
+                            <span>{{ row.label }}</span><strong>{{ row.value }}</strong>
+                        </div>
+                    </div>
+                    <div v-else class="empty compact">No line counter is defined for this pipeline.</div>
+                </article>
+            </section>
+
+            <section v-if="!sources.length" class="waiting">
+                <span class="pulse"></span>
+                Waiting for callback data from Node-RED.
+            </section>
+        </main>
+    </div>
+
+    <script nomodule>
+        document.getElementById("app").textContent = "This dashboard requires JavaScript modules.";
+    </script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+Custom DeepStream bounding-box parser for AIPV1EMI0001
+=======================================================
+
+Parses the output of the YOLOv7-tiny TensorRT engine (EfficientNMS_TRT node:
+num_dets / det_boxes / det_scores / det_classes) into
+NvDsInferObjectDetectionInfo for DeepStream's nvinfer (Triton backend).
+
+Build
+-----
+
+Built automatically by bin/build.sh at the repository root:
+
+    cd bin && ./build.sh
+
+which runs `make` in this directory and copies the resulting
+libnvds_infercustomparser.so into models/AIPV1EMI0001_Yolo_Detector/.
+
+Requires the DeepStream headers and CUDA toolkit available in the station's
+ms3_videostreaming / ms8_jupyter containers (CUDA_VER is passed by build.sh).
+
+Usage
+-----
+
+Referenced from configs/config_infer_primary_detector_yolov7.txt:
+
+    postprocess {
+      detection {
+        custom_parse_bbox_func: "NvDsInferParseCustomEfficientNMS"
+      }
+    }
+    custom_lib {
+      path: "../models/AIPV1EMI0001_Yolo_Detector/libnvds_infercustomparser.so"
+    }

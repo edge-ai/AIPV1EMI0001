@@ -1,0 +1,210 @@
+##################################################################################################
+#
+# Pipeline to create a package for the AIPV1EMI0001 AiProcessor (YOLOv7-tiny detector)
+#
+###################################################################################################
+
+name: "CI/CD to build the AiProcessor 📦"
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+    paths-ignore:
+      - '**.md'
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+# Cancel a superseded run when the same tag is re-pushed.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JETPACK_VERSION: 36.3.0
+  AWS_DEFAULT_REGION: ap-northeast-1
+  S3_UPLOAD_BUCKET: edgeai-aiprocessors/AIPV1EMI0001
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write  # create the GitHub release and upload assets
+    env:
+      # EdgeMatrix-internal publishing (AIP store bucket, Slack). Skipped when the
+      # secrets are absent, e.g. on forks of the public repository.
+      PUBLISH_TO_STORE: ${{ secrets.SOL_AWS_ACCESS_KEY_ID != '' }}
+      NOTIFY_SLACK: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Download model weights from Hugging Face
+        run: |
+          HF_BASE="https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/main"
+          MODEL_DIR="models/AIPV1EMI0001_Yolo_Detector"
+          mkdir -p "$MODEL_DIR/1"
+          curl -fL "$HF_BASE/yolov7tiny-parking-rev3-640.onnx" -o "$MODEL_DIR/yolov7tiny-parking-rev3-640.onnx"
+          curl -fL "$HF_BASE/yolov7-fp16-1x8x8-jp6-l4t36.3-arm64.engine" -o "$MODEL_DIR/1/yolov7-fp16-1x8x8.engine"
+          echo "5796e9e0836751e3b7a9623cc6db976ac7fd087fcfb2742d20d06dcf0a0b3560  $MODEL_DIR/yolov7tiny-parking-rev3-640.onnx" | sha256sum -c -
+          echo "670150b495a0f120d178fbbb1e3f29758ccbee710e4477bf6847f46517a873b8  $MODEL_DIR/1/yolov7-fp16-1x8x8.engine" | sha256sum -c -
+
+      - name: Configure AWS credentials
+        if: env.PUBLISH_TO_STORE == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.SOL_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.SOL_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Set version
+        id: version
+        run: |
+          UNIQUE_ID=$(jq -r '.unique_id' manifest.json)
+          VERSION=${GITHUB_REF#refs/tags/}
+          # workflow_dispatch runs on a branch, not a tag: fall back to manifest version
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF" ]; then
+            VERSION="v$(jq -r '.version' manifest.json)"
+          fi
+          ARCH="arm64"
+          TARGET="all"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "filename=$UNIQUE_ID-$VERSION-$JETPACK_VERSION-$ARCH-$TARGET" >> "$GITHUB_OUTPUT"
+
+      # Assemble the same file set as `eais-tools aip build` (runtime files only):
+      # manifest, callback, configs (referenced config_plan only), model repo
+      # (engine + config.pbtxt + labels + custom parser .so), resources, docs,
+      # and optional integration resources declared in .include.
+      - name: Assemble distribution
+        run: |
+          set -e
+          rm -rf dist
+          mkdir -p dist/configs dist/models dist/resources dist/doc
+          cp CHANGELOG.md LICENSE README.md callback.py manifest.json dist/
+          cp -r doc/. dist/doc/
+          cp -r resources/. dist/resources/
+          # Keep only the configs referenced by manifest.json config_plan entries
+          # (fails below in validation if one is missing)
+          for cfg in $(jq -r '.. | objects | .config_plan? // empty' manifest.json); do
+            [ -f "configs/$cfg" ] && cp "configs/$cfg" dist/configs/ || echo "skip missing config: $cfg"
+          done
+          # Model repo: runtime files only (no .onnx/.pt/.cfg/.wts sources)
+          cp -r models/AIPV1EMI0001_Yolo_Detector dist/models/
+          rm -f dist/models/*/*.onnx dist/models/*/*.pt dist/models/*/*.cfg dist/models/*/*.wts
+          # Copy optional runtime integrations listed by eais-tools' .include
+          # convention. Dependencies and credentials are deployment-local.
+          while IFS= read -r include_path; do
+            case "$include_path" in
+              ""|\#*) continue ;;
+            esac
+            include_dir=${include_path%/}
+            [ -d "$include_dir" ] || { echo "::error::missing include directory: $include_path"; exit 1; }
+            cp -r "$include_dir" dist/
+          done < .include
+          find dist -type d -name node_modules -prune -exec rm -rf {} +
+          rm -f dist/logic/flows_cred.json
+
+      - name: Validate distribution contents
+        run: |
+          set -e
+          ENGINE="dist/models/AIPV1EMI0001_Yolo_Detector/1/yolov7-fp16-1x8x8.engine"
+          PARSER="dist/models/AIPV1EMI0001_Yolo_Detector/libnvds_infercustomparser.so"
+          for f in "$ENGINE" "$PARSER" dist/manifest.json dist/callback.py \
+            dist/configs/config_infer_primary_detector_yolov7.txt \
+            dist/configs/config_tracker_NvDCF_perf.yml \
+            dist/logic/flows.json dist/logic/package.json \
+            dist/dashboard/package.json \
+            dist/dashboard/aipv1emi0001_dash/src/index.html \
+            dist/dashboard/aipv1emi0001_dash/src/index.js \
+            dist/dashboard/aipv1emi0001_dash/src/index.css; do
+            [ -f "$f" ] || { echo "::error::missing from dist: $f"; exit 1; }
+          done
+          if [ -e dist/logic/flows_cred.json ]; then
+            echo "::error::credentials file leaked into dist"; exit 1
+          fi
+          if find dist -type d -name node_modules -print -quit | grep -q .; then
+            echo "::error::node_modules leaked into dist"; exit 1
+          fi
+          # No source artifacts may ship
+          if find dist -name '*.onnx' -o -name '*.pt' -o -name '*.cfg' -o -name '*.cpp' -o -name 'Makefile' | grep .; then
+            echo "::error::source files leaked into dist"; exit 1
+          fi
+          echo "dist contents OK"
+
+      - name: Make tarball
+        run: |
+          tar -zcvf ${{ steps.version.outputs.filename }}.tar.gz -C dist .
+
+      - name: Upload tgz archive to S3
+        if: env.PUBLISH_TO_STORE == 'true'
+        run: |
+          aws s3 cp ./${{ steps.version.outputs.filename }}.tar.gz s3://${{ env.S3_UPLOAD_BUCKET }}/
+          aws s3 cp manifest.json s3://${{ env.S3_UPLOAD_BUCKET }}/
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.version.outputs.version }}
+          files: ${{ steps.version.outputs.filename }}.tar.gz
+          generate_release_notes: true
+
+      - name: Send Slack notification
+        if: env.NOTIFY_SLACK == 'true'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_MESSAGE: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "AIPV1EMI0001 — YOLOv7-tiny AiProcessor",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    {
+                      "type": "plain_text",
+                      "text": "A new package has been released 📦",
+                      "emoji": true
+                    }
+                  ]
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Tag*: ${{ steps.version.outputs.version }}\n*SHA*: ${{ github.sha }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "View on GitHub"
+                  },
+                  "accessory": {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "Open",
+                      "emoji": true
+                    },
+                    "value": "open_github_repo",
+                    "url": "https://github.com/edge-ai/AIPV1EMI0001",
+                    "action_id": "button-action-github"
+                  }
+                }
+              ]
+            }
+        run: |
+          curl -X POST -H 'Content-type: application/json' --data "${SLACK_MESSAGE}" "$SLACK_WEBHOOK_URL"

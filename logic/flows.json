@@ -1,0 +1,216 @@
+[
+  {
+    "id": "aipv1emi0001logic",
+    "type": "tab",
+    "label": "AIPV1EMI0001 Logic",
+    "disabled": false,
+    "info": "Normalizes AIPV1EMI0001 callback payloads for the bundled dashboard.\n\nSet AIP_PIPELINE_ID in this tab's Environment properties before deploying.",
+    "env": [
+      {
+        "name": "AIP_PIPELINE_ID",
+        "value": "",
+        "type": "str"
+      }
+    ]
+  },
+  {
+    "id": "aipv1emi0001dash",
+    "type": "tab",
+    "label": "AIPV1EMI0001 Dashboard",
+    "disabled": false,
+    "info": "Serves the aipv1emi0001_dash UIBuilder application.",
+    "env": []
+  },
+  {
+    "id": "aipv1emi0001server",
+    "type": "eais-server",
+    "name": "local device",
+    "deploymentMode": "local",
+    "deviceUrl": "",
+    "allowInsecureTls": true
+  },
+  {
+    "id": "aipv1emi0001callback",
+    "type": "callback",
+    "z": "aipv1emi0001logic",
+    "name": "AIPV1EMI0001 callback",
+    "server": "aipv1emi0001server",
+    "pipelineId": "${AIP_PIPELINE_ID}",
+    "command": "subscribe",
+    "obj": "true",
+    "enrichMetadata": true,
+    "timeout": 0,
+    "x": 190,
+    "y": 100,
+    "wires": [
+      [
+        "aipv1emi0001normalize",
+        "aipv1emi0001inspect"
+      ]
+    ]
+  },
+  {
+    "id": "aipv1emi0001normalize",
+    "type": "function",
+    "z": "aipv1emi0001logic",
+    "name": "normalize detector metrics",
+    "func": "// Function justified: the callback has three structurally different delivery\n// envelopes (passthrough, merge, and time-windowed push). Safely normalizing\n// those recursive shapes and resolving aggregate values is not maintainable as\n// a single declarative JSONata expression.\n\nconst CLASS_NAMES = [\"car\", \"person\", \"truck\"];\n\nfunction parsePayload(value) {\n    if (typeof value !== \"string\") return value;\n    try { return JSON.parse(value); }\n    catch (err) {\n        node.warn(\"Ignoring non-JSON callback payload: \" + err.message);\n        return null;\n    }\n}\n\nfunction collectSources(value, output, depth) {\n    if (depth > 6 || value == null) return;\n    if (Array.isArray(value)) {\n        for (const item of value) collectSources(item, output, depth + 1);\n        return;\n    }\n    if (typeof value !== \"object\") return;\n    if (value.source_id != null && (value.obj_counter != null || value.analytics_obj_cnt != null || value.objInROIcnt != null)) {\n        output.push(value);\n        return;\n    }\n    if (value.data != null) {\n        collectSources(value.data, output, depth + 1);\n        return;\n    }\n    for (const child of Object.values(value)) collectSources(child, output, depth + 1);\n}\n\nfunction countValue(value, preferred) {\n    if (Number.isFinite(Number(value))) return Number(value);\n    if (!value || typeof value !== \"object\") return 0;\n    for (const key of preferred) {\n        if (Number.isFinite(Number(value[key]))) return Number(value[key]);\n    }\n    return 0;\n}\n\nfunction normalizeMap(value, preferred) {\n    const result = {};\n    if (!value || typeof value !== \"object\" || Array.isArray(value)) return result;\n    for (const [key, raw] of Object.entries(value)) result[key] = countValue(raw, preferred);\n    return result;\n}\n\nlet payload = parsePayload(msg.payload);\nif (Array.isArray(payload)) {\n    const records = payload.filter((item) => item && typeof item === \"object\" && item.data != null);\n    if (records.length) payload = records[records.length - 1].data;\n}\n\nconst rawSources = [];\ncollectSources(payload, rawSources, 0);\nif (!rawSources.length) {\n    node.warn(\"Callback payload did not contain AIPV1EMI0001 source metrics\");\n    return null;\n}\n\nconst mediaSources = msg.metadata && msg.metadata.mediaSources && typeof msg.metadata.mediaSources === \"object\"\n    ? msg.metadata.mediaSources : {};\nconst sources = rawSources.map((source) => {\n    const id = String(source.source_id);\n    const counts = {};\n    if (Array.isArray(source.obj_counter)) {\n        CLASS_NAMES.forEach((name, index) => { counts[name] = countValue(source.obj_counter[index], [\"max_val\", \"mean_val\"]); });\n    } else {\n        Object.assign(counts, normalizeMap(source.obj_counter, [\"max_val\", \"mean_val\", \"median_val\", \"count_val\"]));\n    }\n    const analytics = source.analytics_obj_cnt && typeof source.analytics_obj_cnt === \"object\"\n        ? source.analytics_obj_cnt : {};\n    const roi = normalizeMap(analytics.objInROIcnt || source.objInROIcnt, [\"max_val\", \"sum_val\"]);\n    const lineCrossing = normalizeMap(analytics.objLCCurrCnt || source.objLCCurrCnt, [\"max_val\", \"sum_val\"]);\n    const total = Object.values(counts).reduce((sum, value) => sum + value, 0);\n    return {\n        id,\n        name: mediaSources[id] && mediaSources[id].name ? mediaSources[id].name : \"Source \" + id,\n        frameFrom: source.frame_number_from != null ? source.frame_number_from : source.frame_num,\n        frameTo: source.frame_number_to != null ? source.frame_number_to : source.frame_num,\n        counts,\n        total,\n        roi,\n        lineCrossing\n    };\n});\n\nconst totals = { classes: {}, roi: {}, lineCrossing: {}, objects: 0 };\nfor (const source of sources) {\n    totals.objects += source.total;\n    for (const [key, value] of Object.entries(source.counts)) totals.classes[key] = (totals.classes[key] || 0) + value;\n    for (const [key, value] of Object.entries(source.roi)) totals.roi[key] = (totals.roi[key] || 0) + value;\n    for (const [key, value] of Object.entries(source.lineCrossing)) totals.lineCrossing[key] = (totals.lineCrossing[key] || 0) + value;\n}\n\nconst pipelineId = (msg.metadata && msg.metadata.pipeline && msg.metadata.pipeline.uuid)\n    || (msg.eais && msg.eais.pipelineId)\n    || env.get(\"AIP_PIPELINE_ID\");\nmsg.payload = {\n    type: \"aipv1emi0001.metrics\",\n    timestamp: new Date().toISOString(),\n    aggregation: \"latest frame or merge-window maximum\",\n    pipeline: {\n        id: pipelineId || \"\",\n        name: (msg.metadata && msg.metadata.pipeline && msg.metadata.pipeline.name) || \"\"\n    },\n    hlsUrl: pipelineId ? \"/ms3/pipeline/\" + encodeURIComponent(pipelineId) + \"/hls\" : \"\",\n    sources,\n    totals\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 490,
+    "y": 100,
+    "wires": [
+      [
+        "aipv1emi0001todash"
+      ]
+    ]
+  },
+  {
+    "id": "aipv1emi0001inspect",
+    "type": "debug",
+    "z": "aipv1emi0001logic",
+    "name": "inspect complete callback msg",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 500,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "aipv1emi0001todash",
+    "type": "link out",
+    "z": "aipv1emi0001logic",
+    "name": "metrics to dashboard",
+    "mode": "link",
+    "links": [
+      "aipv1emi0001fromlogic"
+    ],
+    "x": 735,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "aipv1emi0001logiccatch",
+    "type": "catch",
+    "z": "aipv1emi0001logic",
+    "name": "logic errors",
+    "scope": [
+      "aipv1emi0001callback",
+      "aipv1emi0001normalize"
+    ],
+    "uncaught": false,
+    "x": 190,
+    "y": 240,
+    "wires": [
+      [
+        "aipv1emi0001logicerror"
+      ]
+    ]
+  },
+  {
+    "id": "aipv1emi0001logicerror",
+    "type": "debug",
+    "z": "aipv1emi0001logic",
+    "name": "logic error log",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "error",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 430,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "aipv1emi0001fromlogic",
+    "type": "link in",
+    "z": "aipv1emi0001dash",
+    "name": "normalized metrics",
+    "links": [
+      "aipv1emi0001todash"
+    ],
+    "x": 135,
+    "y": 100,
+    "wires": [
+      [
+        "aipv1emi0001uib"
+      ]
+    ]
+  },
+  {
+    "id": "aipv1emi0001uib",
+    "type": "uibuilder",
+    "z": "aipv1emi0001dash",
+    "name": "aipv1emi0001_dash",
+    "topic": "",
+    "url": "aipv1emi0001_dash",
+    "okToGo": true,
+    "fwdInMessages": false,
+    "allowScripts": false,
+    "allowStyles": false,
+    "copyIndex": true,
+    "templateFolder": "blank",
+    "extTemplate": "",
+    "showfolder": false,
+    "reload": false,
+    "sourceFolder": "src",
+    "deployedVersion": "7.5.0",
+    "showMsgUib": true,
+    "title": "YOLOv7 Object Counts",
+    "descr": "Live object, ROI and line-crossing counts for AIPV1EMI0001.",
+    "editurl": "",
+    "x": 350,
+    "y": 100,
+    "wires": [
+      [],
+      []
+    ]
+  },
+  {
+    "id": "aipv1emi0001dashcatch",
+    "type": "catch",
+    "z": "aipv1emi0001dash",
+    "name": "dashboard errors",
+    "scope": [
+      "aipv1emi0001uib"
+    ],
+    "uncaught": false,
+    "x": 170,
+    "y": 180,
+    "wires": [
+      [
+        "aipv1emi0001dasherror"
+      ]
+    ]
+  },
+  {
+    "id": "aipv1emi0001dasherror",
+    "type": "debug",
+    "z": "aipv1emi0001dash",
+    "name": "dashboard error log",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "error",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 420,
+    "y": 180,
+    "wires": []
+  }
+]

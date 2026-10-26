@@ -1,0 +1,9 @@
+# Bundle the Node-RED business logic and UIBuilder dashboard with the AIP.
+# logic/flows_cred.json is intentionally NOT listed: eais-tools copies files
+# listed here straight off disk, ignoring .gitignore, so a whole-directory
+# "logic/" entry would ship any locally-generated Node-RED credential file.
+logic/flows.json
+logic/package.json
+logic/package-lock.json
+logic/README.md
+dashboard/

@@ -1,0 +1,6 @@
+__pycache__/
+tmp/
+**/node_modules/
+logic/flows_cred.json
+**/.ipynb_checkpoints/
+src/nvdsinfer_customparser/libnvds_infercustomparser.so

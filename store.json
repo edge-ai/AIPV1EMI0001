@@ -1,0 +1,9 @@
+{
+    "unique_id": "AIPV1EMI0001",
+    "name": "Yolov7 tiny",
+    "description": "General Yolov7 tiny model",
+    "vendor": {
+        "name": "Edgematrix",
+        "website": "https://edgematrix.com"
+    }
+}
