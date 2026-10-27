@@ -10,7 +10,7 @@
 #
 #   2. models/AIPV1EMI0001_Yolo_Detector/1/yolov7-fp16-1x8x8.engine
 #      TensorRT FP16 engine built by trtexec from the ONNX model
-#      (models/AIPV1EMI0001_Yolo_Detector/yolov7tiny-parking-rev3-640.onnx),
+#      (models/AIPV1EMI0001_Yolo_Detector/yolov7tiny-640.onnx),
 #      which must be downloaded first (see localdev.ipynb / README).
 #
 # Usage:
@@ -55,7 +55,7 @@ function buildCustomPlugin {
 function buildEngineFromOnnx {
     ModelDir=$1
     EngineFile="yolov7-fp16-1x8x8.engine"
-    OnnxModel="yolov7tiny-parking-rev3-640.onnx"
+    OnnxModel="yolov7tiny-640.onnx"
     mkdir -p "../models/${MODEL_PREFIX}_Yolo_Detector/1"
 
     TRTEXEC_CMD=("${TRTEXEC_BIN}"

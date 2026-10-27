@@ -45,7 +45,7 @@ The trained weights are not stored in this repository. They are published on Hug
 
 | File | Description |
 |---|---|
-| `yolov7tiny-parking-rev3-640.onnx` | **Primary artifact** — ONNX export with `EfficientNMS_TRT`, input for the engine build |
+| `yolov7tiny-640.onnx` | **Primary artifact** — ONNX export with `EfficientNMS_TRT`, input for the engine build |
 | `yolov7-fp16-1x8x8-jp6-l4t36.3-arm64.engine` | Prebuilt TensorRT FP16 engine (JetPack 6 / L4T R36.3 / aarch64 only) |
 | `SHA256SUMS` | Checksums for download verification |
 
@@ -121,8 +121,9 @@ The model architecture is **YOLOv7** by WongKinYiu et al.:
 > *"YOLOv7: Trainable bag-of-freebies sets new state-of-the-art for real-time object detectors."*
 > CVPR 2023. <https://github.com/WongKinYiu/yolov7> — GPL-3.0 License.
 
-The weights were **custom-trained and reparameterized by EdgeMatrix** (parking-lot dataset,
-3 classes) on top of the YOLOv7-tiny architecture.
+This is a general-purpose YOLOv7-tiny integration adapted by EdgeMatrix for EdgeAI Station,
+exposing `car`, `person` and `truck`. It is not a parking-lot-specific model.
+The exact upstream checkpoint provenance of the published export is not documented here.
 
 ## Contributors
 

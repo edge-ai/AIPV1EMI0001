@@ -119,8 +119,9 @@ node before writing downstream bindings.
 
 ## Model
 
-- Architecture: YOLOv7-tiny (WongKinYiu et al., CVPR 2023, MIT) — see README attribution
-- Weights: custom-trained by EdgeMatrix on a parking-lot dataset, reparameterized,
-  exported to ONNX with an `EfficientNMS_TRT` node, built into a TensorRT FP16 engine
+- Architecture: YOLOv7-tiny (WongKinYiu et al., CVPR 2023, GPL-3.0) — see README attribution
+- Integration: general-purpose object detection adapted for EdgeAI Station, not
+  parking-lot-specific training. The exact upstream checkpoint provenance is not documented.
+- Artifacts: `yolov7tiny-640.onnx` with an `EfficientNMS_TRT` node, built into a TensorRT FP16 engine
   (dynamic batch 1–8, 640×640 input)
 - Tracker: NVIDIA NvDCF

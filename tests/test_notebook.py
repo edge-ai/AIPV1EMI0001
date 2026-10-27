@@ -24,6 +24,19 @@ class NotebookTests(unittest.TestCase):
             with self.subTest(cell=name):
                 compile(source, name, "exec")
 
+    def test_onnx_filename_is_consistent(self):
+        source = CELLS["step-04"]
+        namespace = {"AIP_ROOT": ROOT}
+        start = source.index('HF_BASE =')
+        end = source.index('assert ENGINE_SOURCE')
+        exec(source[start:end], namespace)
+        name, (destination, _) = next(iter(namespace["ONNX"].items()))
+        self.assertEqual(name, "yolov7tiny-640.onnx")
+        self.assertEqual(destination.name, name)
+        self.assertIn(f'OnnxModel="{name}"', (ROOT / "bin/build.sh").read_text())
+        self.assertIn(name, CELLS["step-23"])
+        self.assertNotIn("parking-rev3", "\n".join(CELLS.values()))
+
     def test_commands_reject_unexpected_exit_codes(self):
         namespace = {"subprocess": subprocess}
         source = CELLS["step-02"]

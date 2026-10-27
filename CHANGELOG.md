@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- docs: Describe the general-purpose EdgeAI Station integration without parking-dataset training claims
+- fix: Rename the ONNX download to `yolov7tiny-640.onnx` across Hugging Face, the notebook and build script
+
 ## v6.0.0
 
 - fix: Notebook stops on command failures, verifies the exported archive, and preserves the package during cleanup
