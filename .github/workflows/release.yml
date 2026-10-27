@@ -22,13 +22,15 @@ concurrency:
 
 env:
   JETPACK_VERSION: 36.3.0
+  # DeepStream 7.0 Jetson Triton SDK image (ARM64), pinned for parser ABI compatibility.
+  PARSER_BUILD_IMAGE: nvcr.io/nvidia/deepstream@sha256:3579dec5816b1df3d327f8b8c62b0cc55579ba912a32f919d3942c99edfdb9cd
   AWS_DEFAULT_REGION: ap-northeast-1
   S3_UPLOAD_BUCKET: edgeai-aiprocessors/AIPV1EMI0001
 
 jobs:
   release:
     name: Release
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-arm
     permissions:
       contents: write  # create the GitHub release and upload assets
     env:
@@ -40,18 +42,27 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v4
 
+      - name: Check notebook safeguards
+        run: python3 -m unittest discover -s tests
+
       - name: Download model weights from Hugging Face
         run: |
           HF_BASE="https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/main"
           MODEL_DIR="models/AIPV1EMI0001_Yolo_Detector"
           mkdir -p "$MODEL_DIR/1"
-          curl -fL "$HF_BASE/yolov7tiny-parking-rev3-640.onnx" -o "$MODEL_DIR/yolov7tiny-parking-rev3-640.onnx"
           curl -fL "$HF_BASE/yolov7-fp16-1x8x8-jp6-l4t36.3-arm64.engine" -o "$MODEL_DIR/1/yolov7-fp16-1x8x8.engine"
-          echo "5796e9e0836751e3b7a9623cc6db976ac7fd087fcfb2742d20d06dcf0a0b3560  $MODEL_DIR/yolov7tiny-parking-rev3-640.onnx" | sha256sum -c -
           echo "670150b495a0f120d178fbbb1e3f29758ccbee710e4477bf6847f46517a873b8  $MODEL_DIR/1/yolov7-fp16-1x8x8.engine" | sha256sum -c -
 
+      - name: Build ARM64 custom parser
+        run: |
+          docker run --rm --platform linux/arm64 --entrypoint bash \
+            --user "$(id -u):$(id -g)" \
+            -v "$PWD:/workspace" -w /workspace/bin \
+            -e SKIP_ENGINE=1 "$PARSER_BUILD_IMAGE" -eo pipefail ./build.sh
+          file models/AIPV1EMI0001_Yolo_Detector/libnvds_infercustomparser.so | grep 'ARM aarch64'
+
       - name: Configure AWS credentials
-        if: env.PUBLISH_TO_STORE == 'true'
+        if: startsWith(github.ref, 'refs/tags/') && env.PUBLISH_TO_STORE == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.SOL_AWS_ACCESS_KEY_ID }}
@@ -67,6 +78,9 @@ jobs:
           if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF" ]; then
             VERSION="v$(jq -r '.version' manifest.json)"
           fi
+          if [ "$VERSION" != "v$(jq -r '.version' manifest.json)" ]; then
+            echo "::error::release tag does not match manifest.json version"; exit 1
+          fi
           ARCH="arm64"
           TARGET="all"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -80,14 +94,14 @@ jobs:
         run: |
           set -e
           rm -rf dist
-          mkdir -p dist/configs dist/models dist/resources dist/doc
-          cp CHANGELOG.md LICENSE README.md callback.py manifest.json dist/
-          cp -r doc/. dist/doc/
+          mkdir -p dist/configs dist/models dist/resources
+          cp ./*.md LICENSE callback.py manifest.json dist/
           cp -r resources/. dist/resources/
           # Keep only the configs referenced by manifest.json config_plan entries
           # (fails below in validation if one is missing)
           for cfg in $(jq -r '.. | objects | .config_plan? // empty' manifest.json); do
-            [ -f "configs/$cfg" ] && cp "configs/$cfg" dist/configs/ || echo "skip missing config: $cfg"
+            [ -f "configs/$cfg" ] || { echo "::error::missing config: $cfg"; exit 1; }
+            cp "configs/$cfg" dist/configs/
           done
           # Model repo: runtime files only (no .onnx/.pt/.cfg/.wts sources)
           cp -r models/AIPV1EMI0001_Yolo_Detector dist/models/
@@ -99,8 +113,13 @@ jobs:
               ""|\#*) continue ;;
             esac
             include_dir=${include_path%/}
-            [ -d "$include_dir" ] || { echo "::error::missing include directory: $include_path"; exit 1; }
-            cp -r "$include_dir" dist/
+            if [ -d "$include_dir" ]; then
+              cp -r "$include_dir" dist/
+            elif [ -f "$include_dir" ]; then
+              cp --parents "$include_dir" dist/
+            else
+              echo "::error::missing include path: $include_path"; exit 1
+            fi
           done < .include
           find dist -type d -name node_modules -prune -exec rm -rf {} +
           rm -f dist/logic/flows_cred.json
@@ -110,7 +129,7 @@ jobs:
           set -e
           ENGINE="dist/models/AIPV1EMI0001_Yolo_Detector/1/yolov7-fp16-1x8x8.engine"
           PARSER="dist/models/AIPV1EMI0001_Yolo_Detector/libnvds_infercustomparser.so"
-          for f in "$ENGINE" "$PARSER" dist/manifest.json dist/callback.py \
+          for f in "$ENGINE" "$PARSER" dist/manifest.json dist/callback.py dist/LICENSE dist/LICENSE.weights \
             dist/configs/config_infer_primary_detector_yolov7.txt \
             dist/configs/config_tracker_NvDCF_perf.yml \
             dist/logic/flows.json dist/logic/package.json \
@@ -118,7 +137,7 @@ jobs:
             dist/dashboard/aipv1emi0001_dash/src/index.html \
             dist/dashboard/aipv1emi0001_dash/src/index.js \
             dist/dashboard/aipv1emi0001_dash/src/index.css; do
-            [ -f "$f" ] || { echo "::error::missing from dist: $f"; exit 1; }
+            [ -s "$f" ] || { echo "::error::missing or empty file in dist: $f"; exit 1; }
           done
           if [ -e dist/logic/flows_cred.json ]; then
             echo "::error::credentials file leaked into dist"; exit 1
@@ -134,23 +153,35 @@ jobs:
 
       - name: Make tarball
         run: |
-          tar -zcvf ${{ steps.version.outputs.filename }}.tar.gz -C dist .
+          tar -zcf "${{ steps.version.outputs.filename }}.tar.gz" dist
+          sha256sum "${{ steps.version.outputs.filename }}.tar.gz" > "${{ steps.version.outputs.filename }}.tar.gz.sha256"
+
+      - name: Save validated package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.filename }}
+          path: |
+            ${{ steps.version.outputs.filename }}.tar.gz
+            ${{ steps.version.outputs.filename }}.tar.gz.sha256
 
       - name: Upload tgz archive to S3
-        if: env.PUBLISH_TO_STORE == 'true'
+        if: startsWith(github.ref, 'refs/tags/') && env.PUBLISH_TO_STORE == 'true'
         run: |
           aws s3 cp ./${{ steps.version.outputs.filename }}.tar.gz s3://${{ env.S3_UPLOAD_BUCKET }}/
           aws s3 cp manifest.json s3://${{ env.S3_UPLOAD_BUCKET }}/
 
       - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ steps.version.outputs.version }}
-          files: ${{ steps.version.outputs.filename }}.tar.gz
+          files: |
+            ${{ steps.version.outputs.filename }}.tar.gz
+            ${{ steps.version.outputs.filename }}.tar.gz.sha256
           generate_release_notes: true
 
       - name: Send Slack notification
-        if: env.NOTIFY_SLACK == 'true'
+        if: startsWith(github.ref, 'refs/tags/') && env.NOTIFY_SLACK == 'true'
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           SLACK_MESSAGE: |

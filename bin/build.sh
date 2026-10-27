@@ -34,10 +34,8 @@ set -e
 
 MODEL_PREFIX="AIPV1EMI0001"
 WORKSPACE_MIB="${WORKSPACE_MIB:-1024}"
-
-if [ -z "${TRTEXEC_BIN}" ]; then
-    TRTEXEC_BIN=/usr/src/tensorrt/bin/trtexec
-fi
+TRTEXEC_BIN="${TRTEXEC_BIN:-/usr/src/tensorrt/bin/trtexec}"
+SKIP_ENGINE="${SKIP_ENGINE:-0}"
 
 if [ "${SKIP_ENGINE}" != "1" ] && [ ! -f "${TRTEXEC_BIN}" ]; then
     echo "ERROR: trtexec binary not found at ${TRTEXEC_BIN}. Set TRTEXEC_BIN." >&2
@@ -49,8 +47,8 @@ function buildCustomPlugin {
     echo "CUDA version: ${cuda_version}"
     src_dir="../src/nvdsinfer_customparser"
     echo "Building custom parser plugin..."
-    CUDA_VER=${cuda_version} make -C ${src_dir}
-    cp ${src_dir}/libnvds_infercustomparser.so ../models/${MODEL_PREFIX}_Yolo_Detector/
+    CUDA_VER=${cuda_version} make -C "${src_dir}" || return 1
+    cp "${src_dir}/libnvds_infercustomparser.so" "../models/${MODEL_PREFIX}_Yolo_Detector/" || return 1
     echo "Custom parser plugin built successfully."
 }
 
@@ -60,22 +58,22 @@ function buildEngineFromOnnx {
     OnnxModel="yolov7tiny-parking-rev3-640.onnx"
     mkdir -p "../models/${MODEL_PREFIX}_Yolo_Detector/1"
 
-    TRTEXEC_CMD="${TRTEXEC_BIN} \
-        --onnx=../models/${MODEL_PREFIX}_Yolo_Detector/${OnnxModel} \
-        --fp16 \
-        --workspace=${WORKSPACE_MIB} \
-        --minShapes=images:1x3x640x640 \
-        --optShapes=images:8x3x640x640 \
-        --maxShapes=images:8x3x640x640 \
-        --saveEngine=../models/${MODEL_PREFIX}_Yolo_Detector/1/${EngineFile} \
-        --timingCacheFile=timing.cache \
-        --useSpinWait"
+    TRTEXEC_CMD=("${TRTEXEC_BIN}"
+        "--onnx=../models/${MODEL_PREFIX}_Yolo_Detector/${OnnxModel}"
+        --fp16
+        "--workspace=${WORKSPACE_MIB}"
+        --minShapes=images:1x3x640x640
+        --optShapes=images:8x3x640x640
+        --maxShapes=images:8x3x640x640
+        "--saveEngine=../models/${MODEL_PREFIX}_Yolo_Detector/1/${EngineFile}"
+        --timingCacheFile=timing.cache
+        --useSpinWait)
 
     echo "Generating Engine file: ${EngineFile}"
 
     LOG_FILE="buildModel${ModelDir}.log"
     LOG_FILE=${LOG_FILE//[\/]/_}
-    if eval "${TRTEXEC_CMD}" >>"${LOG_FILE}" 2>&1; then
+    if "${TRTEXEC_CMD[@]}" >>"${LOG_FILE}" 2>&1; then
         echo "Finished building Model ${ModelDir}"
         rm "${LOG_FILE}"
     else

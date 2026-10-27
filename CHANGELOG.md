@@ -1,7 +1,12 @@
 # Changelog
 
-## Unreleased
+## v6.0.0
 
+- fix: Notebook stops on command failures, verifies the exported archive, and preserves the package during cleanup
+- fix: Propagate parser compilation failures instead of potentially reusing a stale library
+- docs: Include the model weights' GPL-3.0 licence text in the runtime package
+- ci: Build the ARM64 parser with a pinned public DeepStream SDK image and preserve individual `.include` file paths
+- ci: Match release tags to the manifest version, use the eais-tools archive layout, and publish package checksums
 - feat: Bundle Node-RED object-counting logic and an offline Vue 3 UIBuilder dashboard
 - docs: Model weights are licensed GPL-3.0 (YOLOv7 training code); manifest declares `Apache-2.0 AND GPL-3.0-only`
 - fix: Ship the NvDCF tracker config referenced by the manifest (the tracker previously ran on built-in defaults)

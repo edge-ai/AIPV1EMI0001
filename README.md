@@ -29,7 +29,7 @@ Tracking is handled by the NVIDIA NvDCF multi-object tracker. The AIP supports t
 | `bin/build.sh` | Builds the custom parser plugin and the TensorRT engine with `trtexec` |
 | `localdev.ipynb` | Step-by-step notebook: download weights → build → package → register → test → install dashboard |
 | `doc/` | User manual and integration notes |
-| `.github/workflows/release.yml` | CI: on `v*` tag, packages the AIP archive, publishes a GitHub release and uploads to the AIP store |
+| `.github/workflows/release.yml` | CI: on `v*` tag, packages the AIP archive and publishes a GitHub release; internal store publishing requires secrets |
 
 ## Requirements
 
@@ -59,6 +59,22 @@ The full workflow is a step-by-step guide in the [`localdev.ipynb`](localdev.ipy
 downloading the weights, building the runtime artifacts (or using the prebuilt engine on
 JetPack 6 / TensorRT 8.6.2), packaging with `eais-tools`, registering the AIP, running a test
 pipeline that checks the callback output, and installing the Node-RED dashboard.
+
+The v6.0.0 notebook makes command failures stop execution and verifies the exported
+`AIPV1EMI0001_dist.tgz` against `dist/`, file by file with SHA-256. Cleanup preserves both
+the package and `dist/`. Both the ONNX-build and prebuilt-engine paths were executed
+top to bottom on a Jetson Orin NX 16GB with JetPack 6.0 /
+L4T R36.3 / TensorRT 8.6.2 / DeepStream 7.0, with `eais-tools` 0.9.2.
+Allow 30–60 minutes to compile an engine on a busy Orin NX; the prebuilt option avoids this.
+The runs verified package contents and checksums, inference, callback metadata, and
+dashboard dependency installation. Activating and viewing the dashboard remains a manual step.
+Use a new `NR_PROJECT` name when testing on a station that already has the default
+Node-RED project; the notebook refuses to overwrite it unless explicitly configured.
+
+The tag-triggered release workflow compiles the ARM64 parser in a pinned public DeepStream
+7.0 SDK image, adds the checksum-verified prebuilt engine, and exports an archive with a
+`dist/` root, matching `eais-tools aip export`. A manual workflow run validates packaging
+and saves an Actions artifact without publishing a release.
 
 Run it in the station's Jupyter environment (App-Builder) from a clone at
 `/data/aip/AIPV1EMI0001`:
@@ -124,6 +140,7 @@ This AI Processor was originally developed at EdgeMatrix by:
   AIP): GPL-3.0, because they were trained with the
   [GPL-3.0 YOLOv7 code](https://github.com/WongKinYiu/yolov7/blob/main/LICENSE.md).
   `manifest.json` therefore declares `Apache-2.0 AND GPL-3.0-only`.
+  The packaged weights' licence text is included as [LICENSE.weights](LICENSE.weights).
 
 Third-party files keep their own MIT licence notices:
 [`src/nvdsinfer_customparser/`](src/nvdsinfer_customparser/) and

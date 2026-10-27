@@ -1,7 +1,7 @@
 {
     "unique_id": "AIPV1EMI0001",
     "name": "Yolov7 tiny",
-    "version": "5.1.0",
+    "version": "6.0.0",
     "hardware_target": [
         "EX3",
         "EX5",

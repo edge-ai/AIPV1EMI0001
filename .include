@@ -7,3 +7,6 @@ logic/package.json
 logic/package-lock.json
 logic/README.md
 dashboard/
+doc/
+LICENSE
+LICENSE.weights
