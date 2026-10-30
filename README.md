@@ -27,9 +27,9 @@ Tracking is handled by the NVIDIA NvDCF multi-object tracker. The AIP supports t
 | `models/AIPV1EMI0001_Yolo_Detector/` | Triton model repository: `config.pbtxt`, labels. Model weights are **not** stored here — they are downloaded from Hugging Face (see below) |
 | `src/nvdsinfer_customparser/` | Custom bounding-box parser plugin (`libnvds_infercustomparser.so`) for `nvinfer` |
 | `bin/build.sh` | Builds the custom parser plugin and the TensorRT engine with `trtexec` |
-| `localdev.ipynb` | Step-by-step notebook: download weights → build → package → register → test → install dashboard |
+| `localdev.ipynb` | Step-by-step notebook: download weights → explicit build → optional backend benchmark → package → register → test → install dashboard |
 | `doc/` | User manual and integration notes |
-| `.github/workflows/release.yml` | CI: on `v*` tag, packages the AIP archive and publishes a GitHub release; internal store publishing requires secrets |
+| `.github/workflows/release.yml` | CI: on `v*` tag, packages the AIP archive and publishes a GitHub release |
 
 ## Requirements
 
@@ -71,9 +71,96 @@ dashboard dependency installation. Activating and viewing the dashboard remains 
 Use a new `NR_PROJECT` name when testing on a station that already has the default
 Node-RED project; the notebook refuses to overwrite it unless explicitly configured.
 
+The current notebook exposes the parser's `make` command and the deployment engine's
+`trtexec` flags, with guidance on FP16, workspace and dynamic batch profiles. Section **2A**
+compares direct ONNX Runtime CUDA FP32 inference with TensorRT FP32 (`--noTF32`) and FP16
+engines **using one timing harness**: the same NMS-free graph, one shared GPU-resident
+input per batch (1/4/8), preallocated GPU outputs, one request at a time, and
+`cudaDeviceSynchronize` before and after every timed call (see
+[Comparable ONNX/TensorRT measurements](#comparable-onnxtensorrt-measurements)).
+`trtexec` only builds the engines; the TensorRT Python runtime executes them.
+Numerical output differences are recorded, not treated as detection-accuracy validation.
+Benchmark models, logs and JSON results stay under `tmp/inference-benchmark/`, outside
+the AIP package; the deployment graph retains NMS. The benchmark runs locally without
+a model server and does not restart station services.
+EAIS Tools remain the workflow for packaging and pipeline tests.
+Set `RUN_BENCHMARKS = False` in step 1 to skip the two extra engine builds and measurements.
+
+**Packaging safeguards.** The notebook explicitly passes `.include` to EAIS Tools and
+verifies its resolved file list before building. All entries are individual files:
+EAIS Tools 0.9.2 does not honor `.gitignore` or `!` exclusion rules, and recursively
+includes directories. It also copies `configs/` and model version `1/` without source
+filtering. The notebook requires the exact intended distribution file set and hashes,
+then verifies the exported archive against that snapshot. Unexpected files cause a
+failure, not silent removal.
+
+**Configuration validation.** Mandatory static checks use EAIS's Triton and DeepStream
+validators, plus tracker YAML/library-path checks. Triton validation targets the
+deployment file directly: AIP-wide validation also scans old experiment configs.
+**Runtime acceptance uses `eais-tools pipeline test`**, exercising the actual
+station-managed inference, NvDCF tracker and callback with display output disabled.
+It requires detected objects and valid callback metadata, not merely a start response
+or timeout. EAIS Tools 0.9.2's `configs ds check` does not exercise `nvtracker`,
+so the full pipeline test is required to validate tracking.
+Before testing/cleanup, ownership checks prevent the EAIS CLI from replacing or
+deleting existing test resources belonging to another run.
+
+### Comparable ONNX/TensorRT measurements
+
+A fair comparison needs **the same timing boundary** for every backend.
+[NVIDIA's timing definitions](https://docs.nvidia.com/deeplearning/tensorrt/archives/tensorrt-861/developer-guide/index.html#trtexec)
+show why `trtexec` cannot simply be placed next to a Python ONNX Runtime loop: its GPU
+Compute Time excludes host dispatch, its Host Latency sums transfer and GPU times, and it
+pipelines submissions. Section 2A therefore follows Ultralytics's normal prediction path:
+[its inference-only timing block](https://github.com/ultralytics/ultralytics/blob/80c34c050921abd29970d8e3d2a2a41ec6538c98/ultralytics/engine/predictor.py#L380-L397)
+uses [the same synchronized wall-clock profiler](https://github.com/ultralytics/ultralytics/blob/80c34c050921abd29970d8e3d2a2a41ec6538c98/ultralytics/utils/ops.py#L20-L76)
+around each backend. (Its separate
+[`ProfileModels.profile_onnx_model`](https://github.com/ultralytics/ultralytics/blob/80c34c050921abd29970d8e3d2a2a41ec6538c98/ultralytics/utils/benchmarks.py#L512-L585)
+runs ONNX on CPU, so it is not a GPU-to-GPU reference.)
+
+The notebook's harness, in one Python process:
+
+- ONNX Runtime uses only `CUDAExecutionProvider` with `use_tf32=0`, matching the
+  TensorRT engines' `--noTF32`; TensorRT FP16 is built with `--fp16 --noTF32`.
+- The **actual `.engine` files** are executed by TensorRT's Python runtime
+  (`execute_async_v3`). ONNX Runtime's TensorRT provider is not used: it would build
+  its own engine instead of measuring the supplied one.
+- All variants read the same GPU input buffer and write preallocated GPU outputs.
+- Per request: `cudaDeviceSynchronize` → `perf_counter_ns` → one call →
+  `cudaDeviceSynchronize`. 20 warm-up and 50 timed requests per round, 3 rounds, with
+  backend order shuffled each round.
+- Results: median, p95 and mean latency, ms/image, serial images/s and speed-up versus
+  ONNX Runtime at the same batch; outputs are compared after timing. GPU load/frequency
+  and software versions are recorded; clocks and power mode are not changed.
+
+MS8 has TensorRT 8.6.2.3 libraries but no TensorRT Python bindings. The notebook
+does not install anything system-wide: it downloads `python3-libnvinfer` at exactly
+the installed `libnvinfer8` version from the configured NVIDIA Jetson APT repository,
+checks its hash and exact dependencies, extracts it under `tmp/` and adds it to the
+kernel's `sys.path`. A current PyPI `tensorrt` wheel would not match the station.
+
+Reference run of the Section 2A cells (Orin NX 16 GB, L4T R36.3, TensorRT 8.6.2,
+ONNX Runtime 1.19.0; median per-request latency, speed-up versus ONNX Runtime):
+
+| Batch | ONNX Runtime CUDA FP32 | TensorRT FP32 | TensorRT FP16 |
+|---|---|---|---|
+| 1 | 49.8 ms | 38.7 ms (1.29×) | 12.0 ms (4.15×) |
+| 4 | 181.9 ms | 125.7 ms (1.45×) | 34.6 ms (5.26×) |
+| 8 | 317.3 ms | 244.5 ms (1.30×) | 63.3 ms (5.01×) |
+
+The station was running its normal workload (GPU load 55–90 %, clock 918 MHz), so
+absolute times are higher than on an idle device; compare ratios, and re-run for
+your own station. TensorRT FP32 matched ONNX Runtime closely (max raw score difference
+≈ 3×10⁻⁷). FP16 raw scores differed by at most 4×10⁻⁴; some raw box coordinates moved
+by up to 14 px. The input is random, so this is a numerical sanity check, not an
+accuracy evaluation.
+
 The tag-triggered release workflow compiles the ARM64 parser in a pinned public DeepStream
 7.0 SDK image, adds the checksum-verified prebuilt engine, and exports an archive with a
-`dist/` root, matching `eais-tools aip export`. A manual workflow run validates packaging
+`dist/` root, matching `eais-tools aip export`. This image lacks EAIS Tools: CI uses a
+strict assembly fallback with explicit `.include` files and exact file/hash checks,
+not the EAIS CLI. Its output was compared with the real station builder; the notebook
+remains the workflow that executes EAIS validation/build/export. A manual workflow run validates packaging
 and saves an Actions artifact without publishing a release.
 
 Run it in the station's Jupyter environment (App-Builder) from a clone at

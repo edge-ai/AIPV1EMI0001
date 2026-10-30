@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- feat: Compare ONNX Runtime CUDA and TensorRT FP32/FP16 using a shared timing harness
+- fix: Validate configuration and distribution file hashes with EAIS Tools
+- ci: Publish release archives and checksums to GitHub Releases
+- fix: Clearly distinguish latest callback counts from delayed HLS playback; defer inferred synchronization
+- fix: Exclude manual snapshots and unused browser command wiring from the dashboard
+- chore: Pin `@edge-ai/node-red-contrib-eais` 0.6.24 for Node-RED integration
 - docs: Describe the general-purpose EdgeAI Station integration without parking-dataset training claims
 - fix: Rename the ONNX download to `yolov7tiny-640.onnx` across Hugging Face, the notebook and build script
 
@@ -16,11 +22,10 @@
 - docs: Model weights are licensed GPL-3.0 (YOLOv7 training code); manifest declares `Apache-2.0 AND GPL-3.0-only`
 - fix: Ship the NvDCF tracker config referenced by the manifest (the tracker previously ran on built-in defaults)
 - docs: Notebook covers prerequisites, prebuilt-engine option, callback contract check and dashboard install
-- ci: Skip internal store upload and Slack notification when their secrets are not configured
 
 ## v5.1.0
 
-- feat: Use internal triton for inference
+- feat: Use embedded Triton for inference
 
 ## v5.0.0
 

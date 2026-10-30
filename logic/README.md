@@ -22,6 +22,37 @@ The disabled **inspect complete callback msg** node is intentional. Enable it
 when validating a new MS3/callback-node version because the callback delivery
 envelope is not a platform-wide schema.
 
+## Dependencies
+
+`package.json` declares `@edge-ai/node-red-contrib-eais` (callback and server
+nodes) and `node-red-contrib-uibuilder`. The EAIS library also provides a
+`pipeline` node for future business-logic commands such as snapshots; no
+snapshot command path or automatic capture rule is included in this flow.
+
+After the first deploy of a new UIBuilder instance, restart Node-RED once so
+UIBuilder serves the project's `aipv1emi0001_dash` folder.
+
+## Playback and metadata
+
+The dashboard displays the latest received metadata independently of the delayed
+HLS video. They are **not synchronized**. For batched delivery the normalizer uses
+the last window in the batch; counts are window maxima where applicable, not
+necessarily per-frame values. The timestamp is the normalization time, not the
+video frame's capture time.
+
+Segment-name/frame-number synchronization is not included: variable durations,
+pipeline restarts, and differing source clocks make that inference unreliable.
+Accurate alignment requires a shared timing contract between video and metadata.
+The dashboard neither buffers callback windows for alignment nor sends commands
+back to the station. A station snapshot would capture a newer frame than the one
+visible in HLS, so manual snapshot controls and their wiring are excluded.
+
+## Regression checks
+
+From the repository root, run `node --test tests/dashboard.test.cjs`. These
+dependency-free checks cover callback delivery shapes, latest-window selection,
+dashboard message handling, flow references, and the integration package file set.
+
 ## Output contract
 
 The normalizer sends:
