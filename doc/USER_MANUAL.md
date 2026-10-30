@@ -16,7 +16,8 @@ YOLOv7-tiny object detector for the EdgeAI Station: real-time detection of
    from the [GitHub releases](https://github.com/edge-ai/AIPV1EMI0001/releases).
 2. Upload it to the station: **AI Processors** page → **Upload**, or via the API
    (`POST /aiprocessor/upload`).
-3. Register the AIP (`POST /aiprocessor/{pk}/register` or the UI button).
+3. Create a pipeline that uses the AIP. No Triton registration is needed: inference
+   runs inside the DeepStream pipeline (`nvinferserver`).
 
 To build from source instead, follow [`localdev.ipynb`](../localdev.ipynb) step by step.
 
@@ -36,7 +37,7 @@ UIBuilder application in `dashboard/`. The dashboard shows:
 - a combined or per-source view;
 - ROI and line-crossing counts when those analytics are configured.
 
-To activate the dashboard (step 6 of [`localdev.ipynb`](../localdev.ipynb) automates
+To activate the dashboard (step 8 of [`localdev.ipynb`](../localdev.ipynb) automates
 steps 1–4):
 
 1. Copy the bundled `logic/` directory to a new Node-RED project

@@ -138,43 +138,12 @@ jobs:
           if find dist -name '*.onnx' -o -name '*.pt' -o -name '*.cfg' -o -name '*.cpp' -o -name 'Makefile' | grep .; then
             echo "::error::source files leaked into dist"; exit 1
           fi
-          python3 - <<'PY'
-          import hashlib
-          from pathlib import Path
-
-          expected = {
-              "manifest.json", "callback.py", "README.md", "CHANGELOG.md", "DESIGN.md", "PRODUCT.md",
-              "resources/logo.png",
-              "configs/config_infer_primary_detector_yolov7.txt", "configs/config_tracker_NvDCF_perf.yml",
-              "models/AIPV1EMI0001_Yolo_Detector/config.pbtxt",
-              "models/AIPV1EMI0001_Yolo_Detector/labels-rev3.txt",
-              "models/AIPV1EMI0001_Yolo_Detector/libnvds_infercustomparser.so",
-              "models/AIPV1EMI0001_Yolo_Detector/1/yolov7-fp16-1x8x8.engine",
-          }
-          for line in Path(".include").read_text().splitlines():
-              name = line.strip()
-              if not name or name.startswith("#"):
-                  continue
-              path = Path(name)
-              assert not path.is_absolute() and ".." not in path.parts, name
-              assert not any(char in name for char in "!*?[]"), name
-              assert path.is_file(), name
-              expected.add(name)
-          if Path("options.json").is_file():
-              expected.add("options.json")
-          dist = Path("dist")
-          paths = list(dist.rglob("*"))
-          assert not any(p.is_symlink() for p in paths), "symlinks must not ship"
-          actual = {p.relative_to(dist).as_posix() for p in paths if p.is_file()}
-          assert actual == expected, f"dist mismatch: missing={expected - actual}, unexpected={actual - expected}"
-          for name in expected:
-              assert hashlib.sha256(Path(name).read_bytes()).digest() == hashlib.sha256((dist / name).read_bytes()).digest(), name
-          PY
-          echo "dist contents OK"
+          python3 tools/check_package.py
 
       - name: Make tarball
         run: |
           tar -zcf "${{ steps.version.outputs.filename }}.tar.gz" dist
+          python3 tools/check_package.py --archive "${{ steps.version.outputs.filename }}.tar.gz"
           sha256sum "${{ steps.version.outputs.filename }}.tar.gz" > "${{ steps.version.outputs.filename }}.tar.gz.sha256"
 
       - name: Save validated package

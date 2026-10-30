@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- docs: Rewrite `localdev.ipynb` as a command-first build guide based on `eais-tools`, with Mermaid diagrams of the AIP, the runtime pipeline and the build steps
+- docs: Add `presentation.ipynb`, a talk companion on engineering Edge AI applications, with the reference benchmark chart
+- feat: Move the package checks and the benchmark harness to `tools/check_package.py` and `tools/benchmark.py`; publish the reference results under `doc/benchmarks/`
+- ci: Validate the release package and archive with `tools/check_package.py`
+- test: Add offline tests for the notebooks, tools and published benchmark results
 - feat: Compare ONNX Runtime CUDA and TensorRT FP32/FP16 using a shared timing harness
 - fix: Validate configuration and distribution file hashes with EAIS Tools
 - ci: Publish release archives and checksums to GitHub Releases
