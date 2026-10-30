@@ -2,71 +2,26 @@
 
 ## Unreleased
 
+- docs: Rewrite `localdev.ipynb` as a command-first build guide based on `eais-tools`, with Mermaid diagrams of the AIP, the runtime pipeline and the build steps
+- docs: Add `presentation.ipynb`, a talk companion on engineering Edge AI applications, with the reference benchmark chart
+- feat: Move the package checks and the benchmark harness to `tools/check_package.py` and `tools/benchmark.py`; publish the reference results under `doc/benchmarks/`
+- ci: Validate the release package and archive with `tools/check_package.py`
+- test: Add offline tests for the notebooks, tools and published benchmark results
+- feat: Compare ONNX Runtime CUDA and TensorRT FP32/FP16 using a shared timing harness
+- fix: Validate configuration and distribution file hashes with EAIS Tools
+- ci: Publish release archives and checksums to GitHub Releases
+- fix: Clearly distinguish latest callback counts from delayed HLS playback; defer inferred synchronization
+- fix: Exclude manual snapshots and unused browser command wiring from the dashboard
+- chore: Pin `@edge-ai/node-red-contrib-eais` 0.6.24 for Node-RED integration
 - docs: Describe the general-purpose EdgeAI Station integration without parking-dataset training claims
 - fix: Rename the ONNX download to `yolov7tiny-640.onnx` across Hugging Face, the notebook and build script
 
-## v6.0.0
+## v6.0.0 - 2026-10-27
 
-- fix: Notebook stops on command failures, verifies the exported archive, and preserves the package during cleanup
-- fix: Propagate parser compilation failures instead of potentially reusing a stale library
-- docs: Include the model weights' GPL-3.0 licence text in the runtime package
-- ci: Build the ARM64 parser with a pinned public DeepStream SDK image and preserve individual `.include` file paths
-- ci: Match release tags to the manifest version, use the eais-tools archive layout, and publish package checksums
-- feat: Bundle Node-RED object-counting logic and an offline Vue 3 UIBuilder dashboard
-- docs: Model weights are licensed GPL-3.0 (YOLOv7 training code); manifest declares `Apache-2.0 AND GPL-3.0-only`
-- fix: Ship the NvDCF tracker config referenced by the manifest (the tracker previously ran on built-in defaults)
-- docs: Notebook covers prerequisites, prebuilt-engine option, callback contract check and dashboard install
-- ci: Skip internal store upload and Slack notification when their secrets are not configured
+First public release.
 
-## v5.1.0
-
-- feat: Use internal triton for inference
-
-## v5.0.0
-
-- feat: Add analytic_plugins field to the manifest file
-
-## v4.1.1
-
-- upgrade: Recompile TRT engine file for DeepStream 7.0
-
-## v4.1.0
-
-- add: Jupyter Notebook for local build of the AiProcessor archive
-
-## v4.0.1
-
-- update: AiProcessor logo
-
-## v4.0.0
-
-- upgrade!: Migration to DeepStream 6.4
-
-## v3.0.0
-
-- update!: Improved callback function
-
-## v2.2.0 - v2.3.0
-
-- feat: Update callback functions again
-
-## v2.1.0
-
-- feat: Update callback functions
-- fix: Makefile match libnvds_infercustomparser.so version
-
-## v2.0.0 - v2.0.7
-
-- upgrade(breaking change): change metadata adapter implementation
-- fix: missing resources folder with logo
-- fix: add missing .pbtxt file
-- fix: add custom lib parser libnvds_infercustomparser.so
-- fix: broken imports
-- fix: rebuild engine file for DS 6.2
-- fix: change the model config file
-- fix: update custom lib parsers that were not being updated as intended
-- feat: Adapt to the latest abstract class structure
-
-## v1.0.0
-
-- Initial version
+- feat: YOLOv7-tiny car/person/truck detector for DeepStream 7.0 with embedded Triton inference and NvDCF tracking
+- feat: Step-by-step Jupyter notebook to rebuild, package, register and test the AI Processor, with a prebuilt-engine option
+- feat: Bundled Node-RED object-counting logic and an offline Vue 3 UIBuilder dashboard
+- feat: Release workflow builds the ARM64 parser in a pinned public DeepStream SDK image and publishes the archive with its SHA-256 checksum
+- docs: Code is licensed Apache-2.0 and model weights GPL-3.0; the runtime package includes both licence texts

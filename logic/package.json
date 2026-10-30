@@ -5,7 +5,7 @@
   "description": "Node-RED business logic and UIBuilder dashboard for AIPV1EMI0001.",
   "license": "Apache-2.0",
   "dependencies": {
-    "@edge-ai/node-red-contrib-eais": "0.6.23",
+    "@edge-ai/node-red-contrib-eais": "0.6.24",
     "node-red-contrib-uibuilder": "7.5.0"
   },
   "overrides": {

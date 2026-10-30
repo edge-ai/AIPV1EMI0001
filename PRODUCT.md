@@ -43,8 +43,8 @@ the result to the browser.
 - The dashboard is a Vue 3 single-page application with no build step.
 - Callback payload shape varies with MS3 merge and push configuration, so
   Node-RED owns normalization and the browser consumes a stable envelope.
-- Snapshot controls remain excluded until the API discussed in
-  edge-ai/aibox-webserver-backend-ms3#705 is finalized.
+- Snapshot controls are excluded: a new live snapshot would not match the
+  delayed HLS frame currently displayed.
 
 ## Evidence on Hand
 

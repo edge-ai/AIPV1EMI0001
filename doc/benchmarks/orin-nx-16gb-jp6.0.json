@@ -1,0 +1,347 @@
+{
+  "utc": "2026-10-29T17:15:11.882905+00:00",
+  "method": "per request: cudaDeviceSynchronize, perf_counter_ns, one inference call, cudaDeviceSynchronize; shared GPU-resident input; preallocated GPU outputs",
+  "source_onnx_sha256": "5796e9e0836751e3b7a9623cc6db976ac7fd087fcfb2742d20d06dcf0a0b3560",
+  "raw_onnx_sha256": "1e3ab42aaa33c4f91a2c6f0bf2f1bb432d38f087480c8bf7761ff8a3fd168a1f",
+  "engine_sha256": {
+    "TensorRT FP32": "1f9f4d20eca0645e7149653d4724a7673cc1ea646ec1bbc5d0c5f5862f7ad724",
+    "TensorRT FP16": "61d6cce495c9f5dfcf2b3d74a587c254533f998b39a20ac9e014768c3e55435f"
+  },
+  "versions": {
+    "python": "3.10.12",
+    "numpy": "2.2.6",
+    "onnx": "1.22.0",
+    "onnxruntime": "1.19.0",
+    "trtexec": "8602",
+    "libnvinfer8": "8.6.2.3-1+cuda12.2",
+    "source": "python3-libnvinfer_8.6.2.3-1+cuda12.2_arm64.deb (extracted, not installed)",
+    "deb_sha256": "ee1a0e2e4b7a50f42dbfb3cd2d2d85a1e74cff42301ce66ea62e1eb20cbcc4fb",
+    "tensorrt_python": "8.6.2"
+  },
+  "l4t": "# R36 (release) REVISION: 3.0",
+  "onnxruntime_providers": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "onnxruntime_cuda_use_tf32": "0",
+  "tensorrt_build_flags": {
+    "FP32": "--noTF32",
+    "FP16": "--fp16 --noTF32"
+  },
+  "workspace_mib": 1024,
+  "profile_min_opt_max_batch": [
+    1,
+    8,
+    8
+  ],
+  "warmup_requests": 20,
+  "measured_requests_per_round": 50,
+  "rounds": 3,
+  "round_orders": [
+    {
+      "batch": 1,
+      "order": [
+        "TensorRT FP32",
+        "ONNX Runtime CUDA FP32",
+        "TensorRT FP16"
+      ]
+    },
+    {
+      "batch": 1,
+      "order": [
+        "ONNX Runtime CUDA FP32",
+        "TensorRT FP32",
+        "TensorRT FP16"
+      ]
+    },
+    {
+      "batch": 1,
+      "order": [
+        "ONNX Runtime CUDA FP32",
+        "TensorRT FP32",
+        "TensorRT FP16"
+      ]
+    },
+    {
+      "batch": 4,
+      "order": [
+        "TensorRT FP32",
+        "TensorRT FP16",
+        "ONNX Runtime CUDA FP32"
+      ]
+    },
+    {
+      "batch": 4,
+      "order": [
+        "TensorRT FP32",
+        "TensorRT FP16",
+        "ONNX Runtime CUDA FP32"
+      ]
+    },
+    {
+      "batch": 4,
+      "order": [
+        "ONNX Runtime CUDA FP32",
+        "TensorRT FP32",
+        "TensorRT FP16"
+      ]
+    },
+    {
+      "batch": 8,
+      "order": [
+        "ONNX Runtime CUDA FP32",
+        "TensorRT FP32",
+        "TensorRT FP16"
+      ]
+    },
+    {
+      "batch": 8,
+      "order": [
+        "ONNX Runtime CUDA FP32",
+        "TensorRT FP32",
+        "TensorRT FP16"
+      ]
+    },
+    {
+      "batch": 8,
+      "order": [
+        "ONNX Runtime CUDA FP32",
+        "TensorRT FP32",
+        "TensorRT FP16"
+      ]
+    }
+  ],
+  "gpu_state_before": {
+    "gpu_load_percent": 54.8,
+    "gpu_frequency_mhz": 918.0
+  },
+  "gpu_state_after": {
+    "gpu_load_percent": 89.6,
+    "gpu_frequency_mhz": 918.0
+  },
+  "results": [
+    {
+      "variant": "ONNX Runtime CUDA FP32",
+      "batch": 1,
+      "median_ms": 49.804305,
+      "p95_ms": 53.71671859999999,
+      "mean_ms": 48.876798273333335,
+      "round_medians_ms": [
+        49.844771,
+        49.746254,
+        49.870596
+      ],
+      "ms_per_image": 49.804305,
+      "serial_images_per_second": 20.078585576086244,
+      "speedup_vs_onnxruntime": 1.0
+    },
+    {
+      "variant": "TensorRT FP32",
+      "batch": 1,
+      "median_ms": 38.700244,
+      "p95_ms": 39.92629055,
+      "mean_ms": 37.95619200666667,
+      "round_medians_ms": [
+        38.700244,
+        38.11097049999999,
+        39.048388
+      ],
+      "ms_per_image": 38.700244,
+      "serial_images_per_second": 25.839630365121213,
+      "speedup_vs_onnxruntime": 1.2869248317917583
+    },
+    {
+      "variant": "TensorRT FP16",
+      "batch": 1,
+      "median_ms": 11.994788,
+      "p95_ms": 12.50280735,
+      "mean_ms": 11.3977994,
+      "round_medians_ms": [
+        12.006693,
+        12.005941,
+        11.919377
+      ],
+      "ms_per_image": 11.994788,
+      "serial_images_per_second": 83.36954350506237,
+      "speedup_vs_onnxruntime": 4.152162172436895
+    },
+    {
+      "variant": "ONNX Runtime CUDA FP32",
+      "batch": 4,
+      "median_ms": 181.902004,
+      "p95_ms": 194.74262814999997,
+      "mean_ms": 182.77815087333335,
+      "round_medians_ms": [
+        182.6666775,
+        180.228074,
+        183.071752
+      ],
+      "ms_per_image": 45.475501,
+      "serial_images_per_second": 21.989862189753556,
+      "speedup_vs_onnxruntime": 1.0
+    },
+    {
+      "variant": "TensorRT FP32",
+      "batch": 4,
+      "median_ms": 125.656389,
+      "p95_ms": 137.52921965,
+      "mean_ms": 124.33416767333334,
+      "round_medians_ms": [
+        125.656389,
+        122.09912800000001,
+        130.85735549999998
+      ],
+      "ms_per_image": 31.41409725,
+      "serial_images_per_second": 31.832842180432227,
+      "speedup_vs_onnxruntime": 1.4476144464090879
+    },
+    {
+      "variant": "TensorRT FP16",
+      "batch": 4,
+      "median_ms": 34.580366,
+      "p95_ms": 35.8285045,
+      "mean_ms": 32.69983323333333,
+      "round_medians_ms": [
+        34.7367725,
+        34.446839499999996,
+        34.2005085
+      ],
+      "ms_per_image": 8.6450915,
+      "serial_images_per_second": 115.6725755881242,
+      "speedup_vs_onnxruntime": 5.260268326830318
+    },
+    {
+      "variant": "ONNX Runtime CUDA FP32",
+      "batch": 8,
+      "median_ms": 317.269896,
+      "p95_ms": 359.4375566,
+      "mean_ms": 318.2884315,
+      "round_medians_ms": [
+        305.871006,
+        317.357068,
+        325.8042585
+      ],
+      "ms_per_image": 39.658737,
+      "serial_images_per_second": 25.215124727749146,
+      "speedup_vs_onnxruntime": 1.0
+    },
+    {
+      "variant": "TensorRT FP32",
+      "batch": 8,
+      "median_ms": 244.4504905,
+      "p95_ms": 262.58815235,
+      "mean_ms": 244.29498959333336,
+      "round_medians_ms": [
+        238.5840375,
+        242.67622,
+        246.4666435
+      ],
+      "ms_per_image": 30.5563113125,
+      "serial_images_per_second": 32.726463275392774,
+      "speedup_vs_onnxruntime": 1.2978901999789607
+    },
+    {
+      "variant": "TensorRT FP16",
+      "batch": 8,
+      "median_ms": 63.2772225,
+      "p95_ms": 69.05853545,
+      "mean_ms": 63.13129989333334,
+      "round_medians_ms": [
+        63.6175415,
+        62.809378,
+        63.806078
+      ],
+      "ms_per_image": 7.9096528125,
+      "serial_images_per_second": 126.42779951348211,
+      "speedup_vs_onnxruntime": 5.013966850393916
+    }
+  ],
+  "output_differences": [
+    {
+      "variant": "TensorRT FP32",
+      "batch": 1,
+      "output": "raw_boxes",
+      "mean_absolute_difference": 1.941074697242584e-05,
+      "max_absolute_difference": 0.001434326171875
+    },
+    {
+      "variant": "TensorRT FP32",
+      "batch": 1,
+      "output": "raw_scores",
+      "mean_absolute_difference": 7.3738029016112705e-09,
+      "max_absolute_difference": 8.61327862367034e-08
+    },
+    {
+      "variant": "TensorRT FP16",
+      "batch": 1,
+      "output": "raw_boxes",
+      "mean_absolute_difference": 0.10719354450702667,
+      "max_absolute_difference": 9.961822509765625
+    },
+    {
+      "variant": "TensorRT FP16",
+      "batch": 1,
+      "output": "raw_scores",
+      "mean_absolute_difference": 7.458912421043351e-08,
+      "max_absolute_difference": 0.0002514161169528961
+    },
+    {
+      "variant": "TensorRT FP32",
+      "batch": 4,
+      "output": "raw_boxes",
+      "mean_absolute_difference": 2.006714385061059e-05,
+      "max_absolute_difference": 0.00213623046875
+    },
+    {
+      "variant": "TensorRT FP32",
+      "batch": 4,
+      "output": "raw_scores",
+      "mean_absolute_difference": 7.3534107691841655e-09,
+      "max_absolute_difference": 8.940696716308594e-08
+    },
+    {
+      "variant": "TensorRT FP16",
+      "batch": 4,
+      "output": "raw_boxes",
+      "mean_absolute_difference": 0.11881928145885468,
+      "max_absolute_difference": 14.15924072265625
+    },
+    {
+      "variant": "TensorRT FP16",
+      "batch": 4,
+      "output": "raw_scores",
+      "mean_absolute_difference": 7.311571437185194e-08,
+      "max_absolute_difference": 0.00025143055245280266
+    },
+    {
+      "variant": "TensorRT FP32",
+      "batch": 8,
+      "output": "raw_boxes",
+      "mean_absolute_difference": 2.1556303181569092e-05,
+      "max_absolute_difference": 0.00286865234375
+    },
+    {
+      "variant": "TensorRT FP32",
+      "batch": 8,
+      "output": "raw_scores",
+      "mean_absolute_difference": 7.382853439708015e-09,
+      "max_absolute_difference": 2.682209014892578e-07
+    },
+    {
+      "variant": "TensorRT FP16",
+      "batch": 8,
+      "output": "raw_boxes",
+      "mean_absolute_difference": 0.11439946293830872,
+      "max_absolute_difference": 14.160400390625
+    },
+    {
+      "variant": "TensorRT FP16",
+      "batch": 8,
+      "output": "raw_scores",
+      "mean_absolute_difference": 8.25580670493764e-08,
+      "max_absolute_difference": 0.0004110261797904968
+    }
+  ],
+  "deployment_engine_sha256": "4e3dfdaf7f6ad46e1b822a0596af12df577c959e273c4a70ee481beb735b87e5",
+  "note": "same timing boundary for all variants; raw NMS-free model latency, not pipeline FPS"
+}

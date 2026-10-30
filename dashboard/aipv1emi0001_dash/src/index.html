@@ -27,8 +27,8 @@
             </div>
             <div class="connection">
                 <span class="status-dot" :class="{ online: connected }"></span>
-                <span>{{ connected ? "Live" : "Disconnected" }}</span>
-                <time>{{ lastUpdateLabel }}</time>
+                <span>{{ connected ? "Connected" : "Disconnected" }}</span>
+                <time :title="'Last metadata received: ' + lastUpdateLabel">{{ lastUpdateLabel }}</time>
             </div>
         </header>
 
@@ -49,18 +49,19 @@
             <section class="hero-grid">
                 <article class="video-card">
                     <div class="card-heading">
-                        <h2>Live pipeline</h2>
+                        <h2>Pipeline playback</h2>
                         <span class="pill" :class="'video-' + videoState">{{ videoState }}</span>
                     </div>
                     <div class="video-frame">
                         <video v-if="hlsUrl" ref="video" muted autoplay playsinline controls></video>
                         <div v-else class="empty">Waiting for a pipeline identifier.</div>
                     </div>
+                    <p class="playback-note">Delayed HLS video. Counts show the latest received metadata and are not synchronized with this playback.</p>
                 </article>
 
                 <article class="counter-panel">
                     <div class="counter-heading">
-                        <h2>Current counts</h2>
+                        <h2>Latest counts</h2>
                         <span>{{ selectedSource === "all" ? sources.length + " sources" : selectedSourceName }}</span>
                     </div>
                     <div class="total-row">
