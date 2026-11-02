@@ -38,7 +38,7 @@ ACCURACY_BASH = {name: source.split("\n", 1)[1] for name, source in ACCURACY_COD
 STUBS = {
     "curl": """
         echo "curl $*" >> "$CALLS"
-        url=${@: -1}; name=${url##*/}
+        url=${@: -1}; name=${url##*/}; name=${name%%[?]*}
         [ -f "$FIXTURES/$name.json" ] || exit 22
         cat "$FIXTURES/$name.json"
     """,
@@ -158,11 +158,13 @@ class NotebookStructureTests(unittest.TestCase):
         source = "\n".join(CODE.values())
         for command in ('eais-tools aip check --uuid "$AIP_ID"',
                         'eais-tools aip build --uuid "$AIP_ID" --include-file .include',
-                        'eais-tools aip export --uuid "$AIP_ID"', "eais-tools aip scan",
+                        'eais-tools aip export --uuid "$AIP_ID"',
+                        'curl -fsS -X POST "$MS3/aiprocessor/scan/$AIP_ID?force=false"',
                         "eais-tools pipeline test", "eais-tools pipeline clean",
                         "python3 tools/check_package.py", "python3 tools/benchmark.py run",
                         "validate_specified_triton_config", "validate_ds_config"):
             self.assertIn(command, source)
+        self.assertNotIn("eais-tools aip scan", source)
         for removed in ("config_diagnostic", "gst-launch", "tritonserver", "launch_triton_server",
                         "sudo", "pip install", "docker ", "systemctl"):
             self.assertNotIn(removed, source)
@@ -262,6 +264,29 @@ class NotebookBehaviourTests(unittest.TestCase):
                     export = station.run("package-export")
                     self.assertEqual(export.returncode, 0, export.stdout + export.stderr)
                     self.assertIn("archive AIPV1EMI0001_dist.tgz matches", export.stdout)
+
+    def test_registration_scans_only_the_target_without_forcing(self):
+        aip = {"pk": "aip-pk", "unique_id": "AIPV1EMI0001", "version": "6.0.0"}
+        with tempfile.TemporaryDirectory() as directory:
+            station = Station(directory, {"AIPV1EMI0001": aip, "aiprocessors": [aip]})
+            (station.root / "manifest.json").write_text(json.dumps({"version": "6.0.0"}))
+            result = station.run("register")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(station.log(), [
+                "curl -fsS -X POST http://ms3/aiprocessor/scan/AIPV1EMI0001?force=false",
+                "curl -fsS http://ms3/aiprocessors",
+            ])
+
+    def test_registration_stops_when_the_target_scan_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            station = Station(directory, {"aiprocessors": []})
+            (station.root / "manifest.json").write_text(json.dumps({"version": "6.0.0"}))
+            result = station.run("register")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Targeted scan failed", result.stdout + result.stderr)
+            self.assertEqual(station.log(), [
+                "curl -fsS -X POST http://ms3/aiprocessor/scan/AIPV1EMI0001?force=false",
+            ])
 
     def test_pipeline_test_refuses_existing_test_resources(self):
         for endpoint in ("pipelines", "medias"):

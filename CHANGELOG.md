@@ -8,6 +8,7 @@
 - ci: Validate the release package and archive with `tools/check_package.py`
 - test: Add offline tests for the notebooks, tools and published benchmark results
 - fix: Preserve model files and TensorRT timing caches that existed before a notebook run
+- fix: Scan only this AI Processor without force-unregistering model-server registrations
 - docs: Refresh the inference benchmark with pipelines stopped and report observed CPU/GPU node placement
 - feat: Add a labelled detection accuracy tutorial and evaluator alongside the inference latency benchmark
 - docs: Publish the full COCO validation reference, including per-class detection metrics and limitations

@@ -89,7 +89,7 @@ flowchart TD
     S2 --> S3{"3. Benchmark<br/>(optional)"}
     S3 --> S4["4. Validate<br/>eais-tools aip check + config validators"]
     S4 --> S5["5. Package<br/>eais-tools aip build / export"]
-    S5 --> S6["6. Scan<br/>eais-tools aip scan"]
+    S5 --> S6["6. Scan<br/>target AIP only"]
     S6 --> S7["7. Pipeline test<br/>eais-tools pipeline test"]
     S7 --> S8["8. Node-RED + dashboard"]
     S8 --> S9["9. Cleanup"]
@@ -131,6 +131,11 @@ Unexpected files cause a failure, not silent removal.
 and DeepStream validators directly on the deployment configs, plus tracker YAML and library
 path checks. (`eais-tools configs triton check` and `configs ds check` start a blocking
 server, and the latter does not exercise `nvtracker`.)
+
+**Targeted scan.** Step 6 asks ms3 to scan only this AIP with `force=false`, rather than
+rescanning every processor. If this AIP is already registered with the separate ms7 model
+server, the scan fails instead of force-unregistering it; coordinate with the station
+administrator before changing that registration.
 
 **Runtime acceptance.** Step 7 runs `eais-tools pipeline test` on the station-managed
 pipeline (inference, NvDCF tracker and callback, display output disabled). It requires
