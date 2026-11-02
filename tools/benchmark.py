@@ -126,7 +126,7 @@ def load_tensorrt(work_dir, trtexec=DEFAULT_TRTEXEC):
     info = {"trtexec": trt_version, "libnvinfer8": libnvinfer}
     try:
         import tensorrt as trt
-        info["source"] = "preinstalled"
+        info["source"] = "importable Python module"
     except ModuleNotFoundError:
         package = f"python3-libnvinfer={libnvinfer}"
         root = Path(work_dir) / "tensorrt-python"
@@ -172,12 +172,46 @@ def summarize(label, batch, rounds, reference_median=None, *,
     }
 
 
+def summarize_ort_profile(events):
+    """Count unique executed nodes by provider and operator across profiling runs."""
+    nodes = {}
+    for event in events:
+        if event.get("cat") != "Node" or not event.get("name", "").endswith("_kernel_time"):
+            continue
+        args = event.get("args", {})
+        if any(key not in args or args[key] is None or args[key] == ""
+               for key in ("node_index", "provider", "op_name")):
+            raise ValueError(f"ONNX Runtime profile is missing node placement: {event.get('name')}")
+        index = str(args["node_index"])
+        assignment = (args["provider"], args["op_name"])
+        if index in nodes and nodes[index] != assignment:
+            raise ValueError(f"ONNX Runtime node {index} changed provider or operator")
+        nodes[index] = assignment
+
+    providers = {}
+    for provider, operation in nodes.values():
+        summary = providers.setdefault(provider, {"node_count": 0, "operator_counts": {}})
+        summary["node_count"] += 1
+        counts = summary["operator_counts"]
+        counts[operation] = counts.get(operation, 0) + 1
+    if "CUDAExecutionProvider" not in providers:
+        raise ValueError("No CUDA node executions found in the ONNX Runtime profile")
+    return providers
+
+
 def gpu_state():
     load = Path("/sys/devices/platform/gpu.0/load")
     frequency = Path("/sys/class/devfreq/17000000.gpu/cur_freq")
+    temperature = None
+    for sensor in Path("/sys/class/thermal").glob("thermal_zone*/type"):
+        if sensor.read_text().strip().lower() in {"gpu-thermal", "gpu-therm"}:
+            reading = sensor.with_name("temp")
+            temperature = int(reading.read_text()) / 1000 if reading.exists() else None
+            break
     return {
         "gpu_load_percent": int(load.read_text()) / 10 if load.exists() else None,
         "gpu_frequency_mhz": int(frequency.read_text()) / 1e6 if frequency.exists() else None,
+        "gpu_temperature_c": temperature,
     }
 
 
@@ -195,6 +229,7 @@ def run_benchmark(raw_onnx, engines, output_dir, *, source_onnx=None, deployment
     import onnxruntime as ort
 
     raw_onnx, output_dir = Path(raw_onnx), Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     engines = {label: Path(path) for label, path in engines.items()}
     assert "CUDAExecutionProvider" in ort.get_available_providers(), "ONNX Runtime CUDA provider missing"
     trt, trt_info = load_tensorrt(output_dir, trtexec)
@@ -213,14 +248,40 @@ def run_benchmark(raw_onnx, engines, output_dir, *, source_onnx=None, deployment
         print(f"WARNING: GPU already {state_before['gpu_load_percent']:.0f}% busy before the "
               "benchmark; absolute latencies will include that contention.")
 
+    profile_options = ort.SessionOptions()
+    profile_options.enable_profiling = True
+    profile_options.profile_file_prefix = str(output_dir / "onnxruntime-profile")
     session = ort.InferenceSession(
-        str(raw_onnx), providers=[("CUDAExecutionProvider", {"device_id": 0, "use_tf32": 0})])
+        str(raw_onnx), sess_options=profile_options,
+        providers=[("CUDAExecutionProvider", {"device_id": 0, "use_tf32": 0})])
     session.disable_fallback()
     providers = session.get_providers()
     assert providers[0] == "CUDAExecutionProvider", providers
     assert "TensorrtExecutionProvider" not in providers, providers
     ort_cuda_options = session.get_provider_options()["CUDAExecutionProvider"]
     assert ort_cuda_options["use_tf32"] == "0", ort_cuda_options
+
+    def gpu_outputs(batch):
+        return {name: ort.OrtValue.ortvalue_from_numpy(
+                    np.zeros((batch, CANDIDATES, width), np.float32), "cuda", 0)
+                for name, width in OUTPUTS.items()}
+
+    for batch in BATCHES:
+        profile_input = ort.OrtValue.ortvalue_from_numpy(
+            np.random.default_rng(42).random((batch, 3, 640, 640), dtype=np.float32), "cuda", 0)
+        profile_outputs = gpu_outputs(batch)
+        profile_binding = session.io_binding()
+        profile_binding.bind_ortvalue_input("images", profile_input)
+        for name, value in profile_outputs.items():
+            profile_binding.bind_ortvalue_output(name, value)
+        session.run_with_iobinding(profile_binding)
+        device_sync()
+        del profile_binding, profile_outputs, profile_input
+    profile_path = Path(session.end_profiling())
+    node_placement = summarize_ort_profile(json.loads(profile_path.read_text()))
+    if not set(node_placement).issubset(providers):
+        raise ValueError(f"Profile contains unexpected execution providers: {node_placement}")
+    print(f"ONNX Runtime executed nodes by provider (untimed): {node_placement}", flush=True)
 
     trt_runtime = trt.Runtime(trt.Logger(trt.Logger.WARNING))
     contexts = {}
@@ -236,13 +297,8 @@ def run_benchmark(raw_onnx, engines, output_dir, *, source_onnx=None, deployment
     stream = ctypes.c_void_p()
     cuda_check(cudart.cudaStreamCreateWithFlags(ctypes.byref(stream), 1), "cudaStreamCreateWithFlags")
 
-    def gpu_outputs(batch):
-        return {name: ort.OrtValue.ortvalue_from_numpy(
-                    np.zeros((batch, CANDIDATES, width), np.float32), "cuda", 0)
-                for name, width in OUTPUTS.items()}
-
     order_rng = np.random.default_rng(2026)
-    results, differences, orders = [], [], []
+    results, differences, orders, round_gpu_states = [], [], [], []
     for batch in BATCHES:
         host_input = np.random.default_rng(42).random((batch, 3, 640, 640), dtype=np.float32)
         gpu_input = ort.OrtValue.ortvalue_from_numpy(host_input, "cuda", 0)
@@ -267,13 +323,14 @@ def run_benchmark(raw_onnx, engines, output_dir, *, source_onnx=None, deployment
             runners[label] = run_engine
 
         samples = {label: [] for label in runners}
-        for _ in range(ROUNDS):
+        for round_index in range(ROUNDS):
             order = list(runners)
             order_rng.shuffle(order)
             orders.append({"batch": batch, "order": order})
             for label in order:
                 for _ in range(WARMUP_REQUESTS):
                     runners[label]()
+                round_before = gpu_state()
                 timings = []
                 for _ in range(MEASURED_REQUESTS):
                     device_sync()
@@ -282,6 +339,10 @@ def run_benchmark(raw_onnx, engines, output_dir, *, source_onnx=None, deployment
                     device_sync()
                     timings.append((time.perf_counter_ns() - start) / 1e6)
                 samples[label].append(timings)
+                round_gpu_states.append({
+                    "batch": batch, "round": round_index + 1, "variant": label,
+                    "before": round_before, "after": gpu_state(),
+                })
 
         reference = {name: value.numpy() for name, value in outputs[ORT_LABEL].items()}
         for label in runners:
@@ -318,11 +379,16 @@ def run_benchmark(raw_onnx, engines, output_dir, *, source_onnx=None, deployment
                      "onnx": onnx.__version__, "onnxruntime": ort.__version__, **trt_info},
         "l4t": l4t_release(),
         "onnxruntime_providers": providers, "onnxruntime_cuda_use_tf32": ort_cuda_options["use_tf32"],
+        "onnxruntime_node_placement": {
+            "method": "unique executed nodes from untimed profiling on the same session",
+            "profiled_batches": list(BATCHES), "providers": node_placement,
+        },
         "tensorrt_build_flags": {"FP32": "--noTF32", "FP16": "--fp16 --noTF32"},
         "workspace_mib": workspace_mib, "profile_min_opt_max_batch": [1, 8, 8],
         "warmup_requests": WARMUP_REQUESTS, "measured_requests_per_round": MEASURED_REQUESTS,
         "rounds": ROUNDS, "round_orders": orders,
         "gpu_state_before": state_before, "gpu_state_after": state_after,
+        "gpu_state_during_rounds": round_gpu_states,
         "results": results, "output_differences": differences,
         "deployment_engine_sha256": sha256(deployment_engine) if deployment_engine else None,
         "note": "same timing boundary for all variants; raw NMS-free model latency, not pipeline FPS",

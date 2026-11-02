@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import re
@@ -12,8 +13,10 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import check_package  # noqa: E402
+from public_reference import assert_no_private_references  # noqa: E402
 
 
 def load(name):
@@ -23,9 +26,13 @@ def load(name):
 
 NOTEBOOK = load("localdev.ipynb")
 PRESENTATION = load("presentation.ipynb")
+ACCURACY = load("accuracy.ipynb")
 CODE = {name: source for name, (kind, source) in NOTEBOOK.items() if kind == "code"}
 BASH = {name: source.split("\n", 1)[1] for name, source in CODE.items() if source.startswith("%%bash\n")}
 MARKDOWN = "\n".join(source for kind, source in NOTEBOOK.values() if kind == "markdown")
+ACCURACY_CODE = {name: source for name, (kind, source) in ACCURACY.items() if kind == "code"}
+ACCURACY_BASH = {name: source.split("\n", 1)[1] for name, source in ACCURACY_CODE.items()
+                 if source.startswith("%%bash\n")}
 
 # Station commands replaced by stubs. Each call is appended to $CALLS.
 STUBS = {
@@ -110,8 +117,11 @@ class Station:
             "MODEL_DIR": "models/AIPV1EMI0001_Yolo_Detector", "TRTEXEC": "trtexec",
             "ONNX": "models/AIPV1EMI0001_Yolo_Detector/yolov7tiny-640.onnx",
             "ENGINE": "models/AIPV1EMI0001_Yolo_Detector/1/yolov7-fp16-1x8x8.engine",
+            "ONNX_PREEXISTED": "0", "TIMING_CACHE_PREEXISTED": "0",
+            "CLEANUP_EAIS_RESOURCES": "0",
             "HF_BASE": "https://hf.invalid", "MS3": "http://ms3", "BENCH": "tmp/bench",
             "ENGINE_SOURCE": "build", "RUN_BENCHMARKS": "0", "WORKSPACE_MIB": "1024",
+            "TRT_VERSION": "8602",
             "PIPELINE_ID": "owned-pipeline", "COPYFILE_DISABLE": "1", **env,
         }
         return subprocess.run(["bash", "-c", source], cwd=self.root, env=environment,
@@ -190,6 +200,12 @@ class NotebookBehaviourTests(unittest.TestCase):
                 downloads = [call for call in station.log() if call.startswith("curl")]
                 self.assertEqual(len(downloads), 1)  # the stub fails, so the cell stops there
                 self.assertTrue(downloads[0].endswith(f"https://hf.invalid/{first}"), downloads)
+
+    def test_prebuilt_download_does_not_inherit_the_host_tensorrt_version(self):
+        with patch.dict(os.environ, {"TRT_VERSION": "8.6.2.3"}), tempfile.TemporaryDirectory() as directory:
+            station = Station(directory)
+            station.run("download", ENGINE_SOURCE="prebuilt")
+            self.assertEqual(len([call for call in station.log() if call.startswith("curl")]), 1)
 
     def test_parser_failure_does_not_copy_a_stale_library(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -274,13 +290,62 @@ class NotebookBehaviourTests(unittest.TestCase):
             with self.subTest(pipelines=pipelines, medias=medias), tempfile.TemporaryDirectory() as d:
                 station = Station(d, {"pipelines": pipelines, "medias": medias})
                 (station.root / "AIPV1EMI0001_dist.tgz").write_text("package")
-                result = station.run("cleanup")
+                result = station.run("cleanup", CLEANUP_EAIS_RESOURCES="1")
                 cleaned = "eais-tools pipeline clean" in station.log()
                 self.assertEqual(result.returncode == 0, not refused, result.stdout + result.stderr)
                 self.assertEqual(cleaned, not refused)
                 self.assertTrue((station.root / "AIPV1EMI0001_dist.tgz").is_file())
         self.assertNotIn("rm -rf", BASH["cleanup"])
         self.assertNotIn("dist", BASH["cleanup"].replace("_dist.tgz", ""))
+
+    def test_cleanup_preserves_model_artifacts_that_preexisted_the_run(self):
+        for existed, removed in ((True, False), (False, True)):
+            with self.subTest(preexisted=existed), tempfile.TemporaryDirectory() as directory:
+                station = Station(directory, {"pipelines": [{"pk": "owned-pipeline", "name": "eais_pipeline"}],
+                                               "medias": []})
+                (station.root / "AIPV1EMI0001_dist.tgz").write_text("package")
+                onnx = station.root / "models/AIPV1EMI0001_Yolo_Detector/yolov7tiny-640.onnx"
+                timing_cache = station.root / "bin/timing.cache"
+                onnx.parent.mkdir(parents=True)
+                timing_cache.parent.mkdir(parents=True)
+                onnx.write_text("model")
+                timing_cache.write_text("cache")
+                result = station.run(
+                    "cleanup",
+                    CLEANUP_EAIS_RESOURCES="1",
+                    ONNX_PREEXISTED=str(int(existed)),
+                    TIMING_CACHE_PREEXISTED=str(int(existed)),
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(onnx.exists(), not removed)
+                self.assertEqual(timing_cache.exists(), not removed)
+
+    def test_cleanup_requires_explicit_opt_in_for_station_wide_removal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            station = Station(directory, {"pipelines": [{"pk": "owned-pipeline", "name": "eais_pipeline"}],
+                                          "medias": []})
+            (station.root / "AIPV1EMI0001_dist.tgz").write_text("package")
+            result = station.run("cleanup")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Skipped station-wide pipeline cleanup", result.stdout)
+            self.assertNotIn("eais-tools pipeline clean", station.log())
+
+    def test_cleanup_preserves_artifacts_when_ownership_is_unknown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            station = Station(directory, {"pipelines": [{"pk": "owned-pipeline", "name": "eais_pipeline"}],
+                                          "medias": []})
+            (station.root / "AIPV1EMI0001_dist.tgz").write_text("package")
+            onnx = station.root / "models/AIPV1EMI0001_Yolo_Detector/yolov7tiny-640.onnx"
+            timing_cache = station.root / "bin/timing.cache"
+            onnx.parent.mkdir(parents=True)
+            timing_cache.parent.mkdir(parents=True)
+            onnx.write_text("model")
+            timing_cache.write_text("cache")
+            result = station.run("cleanup", CLEANUP_EAIS_RESOURCES="1",
+                                 ONNX_PREEXISTED="", TIMING_CACHE_PREEXISTED="")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(onnx.exists())
+            self.assertTrue(timing_cache.exists())
 
     def test_callback_acceptance(self):
         counts = lambda value: {
@@ -325,8 +390,12 @@ class NotebookBehaviourTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             project = Path(directory) / "projects/nodered-aipv1emi0001-dashboard"
             flows = json.loads((project / "flows.json").read_text())
-            (tab,) = [n for n in flows if n.get("type") == "tab" and n.get("label") == "AIPV1EMI0001 Logic"]
-            self.assertEqual(tab["env"], [{"name": "AIP_PIPELINE_ID", "value": "P1", "type": "str"}])
+            (callback,) = [n for n in flows if n.get("id") == "aipv1emi0001callback"]
+            self.assertEqual(callback["pipelineId"], "P1")
+            package = json.loads((project / "package.json").read_text())
+            self.assertEqual(package["dependencies"]["@edgematrix/node-red-contrib-eais"], "0.7.6")
+            self.assertNotIn("@edge-ai/node-red-contrib-eais", package["dependencies"])
+            self.assertFalse((project / "node_modules").exists())
             self.assertFalse((project / "flows_cred.json").exists())
             self.assertFalse((project / "uibuilder/node_modules/local").exists())
             tracked = subprocess.run(["git", "-C", str(project), "ls-files"], capture_output=True,
@@ -334,6 +403,123 @@ class NotebookBehaviourTests(unittest.TestCase):
             self.assertIn("uibuilder/aipv1emi0001_dash/src/index.js", tracked)
             self.assertFalse([name for name in tracked if "node_modules" in name or "cred" in name])
             self.assertNotEqual(station.run("nodered", PIPELINE_ID="P1").returncode, 0, "must not overwrite")
+
+    def test_nodered_project_requires_a_pipeline_before_writing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            station = Station(directory)
+            result = station.run("nodered", PIPELINE_ID="")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Run the pipeline check first", result.stderr)
+            self.assertFalse((Path(directory) / "projects").exists())
+
+
+class AccuracyNotebookTests(unittest.TestCase):
+    def test_cells_are_short_valid_and_do_not_manage_services(self):
+        cells = json.loads((ROOT / "accuracy.ipynb").read_text())["cells"]
+        ids = [cell["id"] for cell in cells]
+        self.assertEqual(len(ids), len(set(ids)))
+        for name, source in ACCURACY_CODE.items():
+            with self.subTest(cell=name):
+                self.assertLessEqual(len(source.splitlines()), 30)
+                if name in ACCURACY_BASH:
+                    self.assertTrue(ACCURACY_BASH[name].startswith("set -euo pipefail\n"))
+                    result = subprocess.run(["bash", "-n"], input=ACCURACY_BASH[name],
+                                            text=True, capture_output=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                else:
+                    compile(source, name, "exec")
+        code = "\n".join(ACCURACY_CODE.values())
+        for forbidden in ("pipeline stop", "/stop", "systemctl", "docker ", "sudo "):
+            self.assertNotIn(forbidden, code)
+
+    def test_labelled_workflow_is_command_first_and_explains_limits(self):
+        code = "\n".join(ACCURACY_CODE.values())
+        text = " ".join(" ".join(source.split()) for _, source in ACCURACY.values())
+        for command in ("python3 tools/benchmark.py raw-onnx", "python3 tools/accuracy.py run",
+                        "python3 tools/accuracy.py examples", "python3 tools/accuracy.py score",
+                        "--fp32-engine", "--fp16-engine", "--deployment-engine",
+                        "--source-onnx", "--batches 1 4 8", "--score-floor 0.35"):
+            self.assertIn(command, code)
+        for topic in ("COCO", "per-class", "mAP@0.50:0.95", "precision", "recall",
+                      "0.001", "0.35", "not proven identical", "training dataset",
+                      "does **not** run the DeepStream parser", "aggregated counts"):
+            self.assertIn(topic, text)
+        self.assertIn("cmp -s", ACCURACY_BASH["source-onnx"])
+        self.assertIn("--noTF32", ACCURACY_BASH["build-fp32"])
+        self.assertIn("--noTF32 --fp16", ACCURACY_BASH["build-fp16"])
+        self.assertIn("pycocotools==2.0.10", (ROOT / "tools/requirements-accuracy.txt").read_text())
+
+    def test_existing_dataset_does_not_download_and_pipeline_scoring_is_opt_in(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            annotations = root / "labels.json"
+            annotations.write_text("{}")
+            images = root / "images"
+            images.mkdir()
+            binary = root / "bin"
+            binary.mkdir()
+            curl = binary / "curl"
+            curl.write_text("#!/bin/sh\nexit 83\n")
+            curl.chmod(0o755)
+            env = {**os.environ, "PATH": f"{binary}:{os.environ['PATH']}", "DOWNLOAD_COCO": "0",
+                   "DATA_ROOT": str(root), "ANNOTATIONS": str(annotations), "IMAGES": str(images),
+                   "RUN_DIR": str(root / "run"), "EVAL_LIMIT": "0", "SCORE_PIPELINE": "0"}
+            for name in ("annotations", "images", "pipeline-score"):
+                with self.subTest(cell=name):
+                    result = subprocess.run(["bash", "-c", ACCURACY_BASH[name]], cwd=ROOT, env=env,
+                                            text=True, capture_output=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / "run").exists())
+
+    def test_public_tutorial_is_linked_and_contains_no_station_identity(self):
+        for path in ("README.md", "localdev.ipynb", "presentation.ipynb"):
+            self.assertIn("accuracy.ipynb", (ROOT / path).read_text(), path)
+        text = (ROOT / "accuracy.ipynb").read_text()
+        assert_no_private_references(self, text, "accuracy.ipynb")
+        notebook = json.loads(text)
+        self.assertFalse(any(cell.get("outputs") for cell in notebook["cells"]),
+                         "the public tutorial must not embed dataset images or private paths")
+
+    def test_published_accuracy_reference_matches_tutorials_and_latency_artifacts(self):
+        path = ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0-accuracy.json"
+        report = json.loads(path.read_text())
+        latency = json.loads((ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0.json").read_text())
+        readme = (ROOT / "README.md").read_text()
+        slide = " ".join(PRESENTATION["accuracy-results"][1].split())
+        self.assertEqual(report["dataset"]["image_count"], 5000)
+        self.assertEqual(report["dataset"]["selection"], "all image IDs")
+        self.assertNotIn("image_ids", report["dataset"])
+        self.assertEqual(report["artifact_sha256"]["source_onnx"], latency["source_onnx_sha256"])
+        self.assertEqual(report["artifact_sha256"]["raw_onnx"], latency["raw_onnx_sha256"])
+        self.assertEqual(report["artifact_sha256"]["Deployment engine"], latency["deployment_engine_sha256"])
+        for variant in ("TensorRT FP32", "TensorRT FP16"):
+            self.assertEqual(report["artifact_sha256"][variant], latency["engine_sha256"][variant])
+        rows = {(row["variant"], row["batch"]): row for row in report["results"]}
+        self.assertEqual(len(rows), 12)
+        self.assertTrue(all("predictions" not in row for row in rows.values()))
+        for variant in ("ONNX Runtime FP32", "TensorRT FP32", "TensorRT FP16"):
+            with self.subTest(variant=variant):
+                maps = [rows[variant, batch]["metrics"]["map_50_95"] for batch in (1, 4, 8)]
+                ap50 = rows[variant, 1]["metrics"]["ap_50"]
+                self.assertIn(f"| {variant} | " + " | ".join(f"{value * 100:.2f}%" for value in maps)
+                              + f" | {ap50 * 100:.2f}% |", readme)
+                self.assertIn(f"| {variant} | {maps[0] * 100:.2f}% | {ap50 * 100:.2f}% |", slide)
+        for batch in (1, 4, 8):
+            self.assertIsNone(rows["Deployment engine", batch]["metrics"]["map_50_95"])
+            self.assertEqual(report["fp16_parity_vs_trt_fp32"][str(batch)]["status"], "pass")
+        for name, metrics in rows["Deployment engine", 1]["metrics"]["classes"].items():
+            precision = metrics["precision_at_035_iou_050"] * 100
+            recall = metrics["recall_at_035_iou_050"] * 100
+            self.assertIn(f'| {name} | {metrics["ground_truth"]:,} | {precision:.2f}% | {recall:.2f}% |', readme)
+            self.assertIn(f"{recall:.2f}% {name}", slide)
+        assert_no_private_references(self, path.read_text(), "accuracy reference report")
+        self.assertNotIn("/tmp/", path.read_text())
+
+    def test_release_ci_installs_accuracy_test_dependencies(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertIn("python3 -m pip install -r tests/requirements-accuracy.txt", workflow)
+        self.assertIn("import cv2, numpy, onnxruntime, pycocotools._mask", workflow)
+        self.assertIn("python3 -m unittest discover -s tests", workflow)
 
 
 class PresentationTests(unittest.TestCase):
@@ -349,11 +535,85 @@ class PresentationTests(unittest.TestCase):
         self.assertIn("doc/benchmarks/orin-nx-16gb-jp6.0.json", text)
         self.assertGreaterEqual(text.count("```mermaid"), 4)
 
+    def test_cached_results_and_chart_match_published_benchmark(self):
+        report = json.loads((ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0.json").read_text())
+        notebook = json.loads((ROOT / "presentation.ipynb").read_text())
+        cells = {cell["id"]: cell for cell in notebook["cells"]}
+        output = "".join("".join(item.get("text", [])) for item in cells["results-load"]["outputs"])
+        for row in report["results"]:
+            self.assertIn(f"{row['median_ms']:.1f} ms", output, row["variant"])
+        providers = report["onnxruntime_node_placement"]["providers"]
+        self.assertIn(f"{providers['CUDAExecutionProvider']['node_count']} CUDA, "
+                      f"{providers['CPUExecutionProvider']['node_count']} CPU", output)
+        (chart,) = [item["data"]["image/png"] for item in cells["results-chart"]["outputs"]
+                    if "image/png" in item.get("data", {})]
+        self.assertEqual(base64.b64decode(chart), (ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0.png").read_bytes())
+
+    def test_teaching_material_qualifies_portability_and_performance_claims(self):
+        presentation = " ".join(" ".join(source.split()) for _, source in PRESENTATION.values())
+        self.assertIn("includes `EfficientNMS_TRT`", presentation)
+        self.assertIn("backend/runtime difference", presentation)
+        self.assertIn("TensorRT FP32 in the reference run", MARKDOWN)
+        self.assertIn("neither notebook trains a model from scratch", presentation.lower())
+        self.assertIn("Neither notebook trains a model from scratch", presentation)
+        self.assertIn("configuration files", presentation)
+        self.assertIn("encoded HLS video follows a separate path", presentation)
+        self.assertIn("not a model-training walkthrough or blank project",
+                      " ".join(MARKDOWN.split()))
+        self.assertIn("Learning goals", MARKDOWN)
+        self.assertIn("station is reserved for this exercise", MARKDOWN)
+        self.assertIn("cannot prove media ownership", MARKDOWN)
+        report = json.loads((ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0.json").read_text())
+        medians = {(row["variant"], row["batch"]): row["median_ms"] for row in report["results"]}
+        ratios = [medians[("TensorRT FP32", batch)] / medians[("TensorRT FP16", batch)]
+                  for batch in (1, 4, 8)]
+        ratio_range = f"{min(ratios):.1f}–{max(ratios):.1f}×"
+        self.assertIn(f"{ratio_range} faster than TensorRT FP32", presentation)
+        self.assertIn(f"{ratio_range} over TensorRT FP32 in the reference run", MARKDOWN)
+
+    def test_teaching_material_explains_optimize_measure_validate(self):
+        guide = " ".join(MARKDOWN.split())
+        presentation = " ".join(" ".join(source.split()) for _, source in PRESENTATION.values())
+        self.assertIn("How this AIP is optimized, measured and validated", guide)
+        self.assertIn("| What is optimized | Why | How it is measured | How it is validated |", guide)
+        self.assertIn("What it does not prove", guide)
+        self.assertIn("**Raw model latency**", guide)
+        self.assertIn("**Pipeline throughput**", guide)
+        self.assertIn("| Check | Section | Proves | Does not prove |", guide)
+        self.assertIn("results.json", guide)
+        self.assertIn("ONNX Runtime may use CPU nodes even when CUDA is requested", guide)
+        self.assertIn("this notebook never stops them automatically", guide)
+        self.assertIn("| Optimization | Measured by | Validated by |", presentation)
+        self.assertIn("Know what is not proven yet", presentation)
+        report = json.loads((ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0.json").read_text())
+        medians = {(row["variant"], row["batch"]): row["median_ms"] for row in report["results"]}
+        runtime_ratios = [medians[("ONNX Runtime CUDA FP32", batch)] / medians[("TensorRT FP32", batch)]
+                          for batch in (1, 4, 8)]
+        self.assertIn(f"{min(runtime_ratios):.1f}–{max(runtime_ratios):.1f}×", presentation)
+        providers = report["onnxruntime_node_placement"]["providers"]
+        cuda = providers["CUDAExecutionProvider"]["node_count"]
+        cpu = providers["CPUExecutionProvider"]["node_count"]
+        self.assertIn(f"{cuda} CUDA and {cpu} CPU nodes", guide)
+        self.assertIn(f"{cuda} CUDA nodes and {cpu} CPU nodes", presentation)
+
     def test_public_content_has_no_station_identity(self):
-        for name in ("presentation.ipynb", "localdev.ipynb"):
-            text = (ROOT / name).read_text()
-            for forbidden in ("192.168.", "DEX5W", "nvidia@", "agent-workspace", "antoine"):
-                self.assertNotIn(forbidden, text, name)
+        for name in ("README.md", "CHANGELOG.md", "presentation.ipynb", "localdev.ipynb",
+                     "accuracy.ipynb", "tools/accuracy.py", "tests/test_accuracy.py",
+                     "tests/test_notebook.py", "tests/test_tools.py", "tests/public_reference.py"):
+            assert_no_private_references(self, (ROOT / name).read_text(), name)
+
+    def test_generic_privacy_checks_detect_representative_identifiers(self):
+        assert_no_private_references(self, "TensorRT 10.3.0.26-1+cuda12.2", "version fixture")
+        examples = (
+            ".".join(("10", "0", "0", "1")),
+            "".join(("ABC", "1", "D", "234567")),
+            "/".join(("", "home", "example", "project")),
+            "-".join(("session", "workspace")),
+            " ".join(("ssh", "example" + "@" + "station")),
+        )
+        for example in examples:
+            with self.subTest(example=example), self.assertRaises(AssertionError):
+                assert_no_private_references(self, example, "fixture")
 
 
 class BuildScriptTests(unittest.TestCase):

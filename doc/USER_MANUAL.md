@@ -37,20 +37,26 @@ UIBuilder application in `dashboard/`. The dashboard shows:
 - a combined or per-source view;
 - ROI and line-crossing counts when those analytics are configured.
 
-To activate the dashboard (step 8 of [`localdev.ipynb`](../localdev.ipynb) automates
-steps 1–4):
+To activate the dashboard, follow these steps. Step 8 of
+[`localdev.ipynb`](../localdev.ipynb) prepares the project and preselects its
+test pipeline, but does not install Node-RED runtime nodes:
 
-1. Copy the bundled `logic/` directory to a new Node-RED project
+1. Make sure the Node-RED runtime loads `@edgematrix/node-red-contrib-eais`
+   0.7.6 and UIBuilder. Do not install the legacy
+   `@edge-ai/node-red-contrib-eais` alongside it: both register the same node
+   types. Have the station administrator arrange the migration and any restart;
+   see [`logic/README.md`](../logic/README.md).
+2. Copy the bundled `logic/` directory to a new Node-RED project
    (`/data/projects/<name>/` on the station) and make it a git repository.
-2. Copy the bundled `dashboard/` contents to that project's `uibuilder/`
+3. Copy the bundled `dashboard/` contents to that project's `uibuilder/`
    directory.
-3. Run `npm ci --omit=dev` in the project's `uibuilder/` directory. The Node-RED
-   nodes themselves are preinstalled on EdgeAI Stations.
-4. Set `AIP_PIPELINE_ID` in the **AIPV1EMI0001 Logic** tab's Environment
-   properties.
-5. In the Node-RED editor, open the project (☰ → **Projects** → **Open**) and
-   deploy. The dashboard is served at `https://<station>/ms5/aipv1emi0001_dash/`.
-6. Assign `aipv1emi0001_dash` to the required users in Accounts management.
+4. Run `npm ci --omit=dev` in the project's `uibuilder/` directory. This installs
+   browser libraries, not the Node-RED runtime nodes.
+5. In the Node-RED editor, open the project (☰ → **Projects** → **Open**).
+   Open **AIPV1EMI0001 callback**, select the pipeline running this AIP, and
+   deploy. The notebook preselects its test pipeline.
+6. Open `https://<station>/ms5/aipv1emi0001_dash/` and assign
+   `aipv1emi0001_dash` to the required users in Accounts management.
 
 No CDN is used. Vue and `hls.js` are installed from the bundled lock file and
 served through UIBuilder's local vendor route.
@@ -121,8 +127,9 @@ node before writing downstream bindings.
 ## Model
 
 - Architecture: YOLOv7-tiny (WongKinYiu et al., CVPR 2023, GPL-3.0) — see README attribution
-- Integration: general-purpose object detection adapted for EdgeAI Station, not
-  parking-lot-specific training. The exact upstream checkpoint provenance is not documented.
+- Integration: an EdgeAI Station adaptation exposing three object classes. The
+  trainer, training dataset, intended domain, and complete checkpoint provenance
+  have not been independently documented.
 - Artifacts: `yolov7tiny-640.onnx` with an `EfficientNMS_TRT` node, built into a TensorRT FP16 engine
   (dynamic batch 1–8, 640×640 input)
 - Tracker: NVIDIA NvDCF

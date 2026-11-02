@@ -35,16 +35,29 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v4
 
-      - name: Check notebook safeguards
-        run: python3 -m unittest discover -s tests
+      - name: Set up Python for accuracy tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install CPU accuracy test dependencies
+        run: python3 -m pip install -r tests/requirements-accuracy.txt
+
+      - name: Check notebook and evaluator safeguards
+        run: |
+          python3 -c 'import cv2, numpy, onnxruntime, pycocotools._mask'
+          python3 -m unittest discover -s tests
 
       - name: Set up Node.js for dashboard checks
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
+      - name: Install public Node-RED integration dependencies
+        run: npm ci --prefix logic --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org/
+
       - name: Check dashboard integration
-        run: node --test tests/dashboard.test.cjs
+        run: node --test tests/dashboard.test.cjs tests/node-red-runtime.test.cjs
 
       - name: Download model weights from Hugging Face
         run: |

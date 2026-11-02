@@ -11,9 +11,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import benchmark  # noqa: E402
 import check_package  # noqa: E402
+from public_reference import assert_no_private_references  # noqa: E402
 
 
 def package_fixture(directory):
@@ -117,6 +119,31 @@ class CheckPackageTests(unittest.TestCase):
 
 
 class BenchmarkTests(unittest.TestCase):
+    def test_ort_profile_summarizes_unique_executed_nodes(self):
+        def node(index, provider, operation):
+            return {"cat": "Node", "name": f"{operation}_{index}_kernel_time",
+                    "args": {"node_index": str(index), "provider": provider, "op_name": operation}}
+
+        gpu = node(1, "CUDAExecutionProvider", "Conv")
+        cpu = node(2, "CPUExecutionProvider", "Shape")
+        events = [
+            {"cat": "Node", "name": "Conv_1_fence_before", "args": {"op_name": "Conv"}},
+            gpu, cpu, gpu.copy(), cpu.copy(),
+        ]
+        self.assertEqual(benchmark.summarize_ort_profile(events), {
+            "CPUExecutionProvider": {"node_count": 1, "operator_counts": {"Shape": 1}},
+            "CUDAExecutionProvider": {"node_count": 1, "operator_counts": {"Conv": 1}},
+        })
+
+        with self.assertRaisesRegex(ValueError, "No CUDA"):
+            benchmark.summarize_ort_profile([cpu])
+        with self.assertRaisesRegex(ValueError, "missing"):
+            benchmark.summarize_ort_profile([
+                {"cat": "Node", "name": "bad_kernel_time", "args": {"op_name": "Conv"}},
+            ])
+        with self.assertRaisesRegex(ValueError, "changed"):
+            benchmark.summarize_ort_profile([gpu, node(1, "CPUExecutionProvider", "Conv")])
+
     def test_tensorrt_binding_dependencies_must_match_exactly(self):
         installed = {"libnvinfer8": "8.6.2.3-1+cuda12.2", "libnvonnxparsers8": "8.6.2.3-1+cuda12.2"}.get
         depends = ("python3 (>= 3.10), python3 (<< 3.11), libnvinfer8 (= 8.6.2.3-1+cuda12.2), "
@@ -151,6 +178,8 @@ class BenchmarkTests(unittest.TestCase):
                          "execute_async_v3(stream.value)", "order_rng.shuffle(order)",
                          '"apt-get", "download"'):
             self.assertIn(required, source)
+        self.assertLess(source.index("session.end_profiling()"),
+                        source.index("start = time.perf_counter_ns()"))
         for forbidden in ("urllib", "socket", "pip install", "sudo", "apt-get install",
                           "--loadEngine", "systemctl", "nvpmodel", "jetson_clocks"):
             self.assertNotIn(forbidden, source)
@@ -179,10 +208,24 @@ class PublishedResultsTests(unittest.TestCase):
         for row in self.report["results"]:
             self.assertIn(f"{row['median_ms']:.1f} ms", readme, row["variant"])
 
+    def test_published_conditions_and_provider_placement_are_consistent(self):
+        placement = self.report["onnxruntime_node_placement"]
+        self.assertEqual(placement["profiled_batches"], list(benchmark.BATCHES))
+        for provider in placement["providers"].values():
+            self.assertEqual(provider["node_count"], sum(provider["operator_counts"].values()))
+        self.assertGreater(placement["providers"]["CUDAExecutionProvider"]["node_count"], 0)
+        self.assertGreater(placement["providers"]["CPUExecutionProvider"]["node_count"], 0)
+        states = self.report["gpu_state_during_rounds"]
+        self.assertEqual({(s["variant"], s["batch"], s["round"]) for s in states},
+                         {(v, b, r) for v in (benchmark.ORT_LABEL, "TensorRT FP32", "TensorRT FP16")
+                          for b in benchmark.BATCHES for r in range(1, benchmark.ROUNDS + 1)})
+        conditions = self.report["run_conditions"]
+        self.assertGreater(conditions["pipeline_checks_with_zero_active"], 0)
+        self.assertLessEqual(max(conditions["idle_gpu_load_percent"]), 10)
+        self.assertLessEqual(max(conditions["idle_gpu_temperature_c"]), 80)
+
     def test_report_contains_no_station_identity(self):
-        text = json.dumps(self.report)
-        for forbidden in ("192.168.", "DEX5W", "nvidia@", "/home/"):
-            self.assertNotIn(forbidden, text)
+        assert_no_private_references(self, json.dumps(self.report), "benchmark report")
 
 
 if __name__ == "__main__":

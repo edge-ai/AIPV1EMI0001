@@ -12,9 +12,9 @@ const normalizer = new Function("msg", "node", "env",
 
 function normalize(payload, extra = {}) {
     const warnings = [];
-    const result = normalizer({ payload, ...extra },
+    const result = normalizer({ payload, eais: { pipelineId: "test-pipeline" }, ...extra },
         { warn: (message) => warnings.push(message) },
-        { get: (name) => name === "AIP_PIPELINE_ID" ? "test-pipeline" : undefined });
+        { get: () => undefined });
     return { data: result && result.payload, warnings };
 }
 
@@ -81,6 +81,13 @@ test("malformed or empty callbacks warn rather than fabricate counts", () => {
     }
 });
 
+test("a missing pipeline ID is reported without inventing an HLS URL", () => {
+    const { data, warnings } = normalize({ source_id: 0, obj_counter: [1, 0, 0] },
+        { eais: undefined });
+    assert.equal(data.hlsUrl, "");
+    assert.match(warnings.join(" "), /pipeline ID/i);
+});
+
 test("dashboard updates immediately without video, resets removed scope, and bounds history", () => {
     const app = dashboard();
     app.selectedSource = "missing";
@@ -102,7 +109,7 @@ test("dashboard updates immediately without video, resets removed scope, and bou
     assert.equal(app.syncTimer, undefined);
 });
 
-test("flow is portable, all references resolve, and browser command wiring is absent", () => {
+test("flow uses a selectable callback pipeline, has valid references, and no browser command wiring", () => {
     const ids = new Set(flows.map((node) => node.id));
     assert.equal(ids.size, flows.length);
     for (const node of flows) {
@@ -112,11 +119,23 @@ test("flow is portable, all references resolve, and browser command wiring is ab
         assert.doesNotMatch(node.id, /snap/i);
     }
     const callback = flows.find((node) => node.type === "callback");
-    assert.equal(callback.pipelineId, "${AIP_PIPELINE_ID}");
-    const tab = flows.find((node) => node.id === callback.z);
-    assert.equal(tab.env.find((entry) => entry.name === "AIP_PIPELINE_ID").value, "");
+    assert.equal(callback.pipelineId, "");
+    assert.equal(flows.find((node) => node.id === callback.server).type, "eais-server");
     assert.deepEqual(flows.find((node) => node.type === "uibuilder").wires, [[], []]);
-    assert.equal(JSON.parse(read("logic/package.json")).dependencies["@edge-ai/node-red-contrib-eais"], "0.6.24");
+});
+
+test("project pins the public EAIS node and excludes the legacy variant", () => {
+    const manifest = JSON.parse(read("logic/package.json"));
+    const lock = JSON.parse(read("logic/package-lock.json"));
+    const name = "@edgematrix/node-red-contrib-eais";
+    const legacy = "@edge-ai/node-red-contrib-eais";
+    assert.equal(manifest.dependencies[name], "0.7.6");
+    assert.equal(manifest.dependencies[legacy], undefined);
+    assert.equal(lock.packages[""].dependencies[name], "0.7.6");
+    assert.equal(lock.packages[`node_modules/${legacy}`], undefined);
+    assert.equal(lock.packages[`node_modules/${name}`].version, "0.7.6");
+    assert.equal(lock.packages[`node_modules/${name}`].resolved,
+        "https://registry.npmjs.org/@edgematrix/node-red-contrib-eais/-/node-red-contrib-eais-0.7.6.tgz");
 });
 
 test("integration package includes runtime assets, excludes credentials, and describes latest counts", () => {

@@ -2,7 +2,7 @@
 
 ![AIPV1EMI0001 — real-time object detection for traffic and industrial environments](doc/assets/hero.jpg)
 
-An [EdgeAI Station](https://edgematrix.com) AiProcessor (AIP) providing general-purpose object detection using a reparameterized [YOLOv7-tiny](https://github.com/WongKinYiu/yolov7) model, running on NVIDIA DeepStream with Triton Inference Server.
+An [EdgeAI Station](https://edgematrix.com) AiProcessor (AIP) detecting cars, people and trucks using a reparameterized [YOLOv7-tiny](https://github.com/WongKinYiu/yolov7) model, running on NVIDIA DeepStream with Triton Inference Server.
 
 ## What it does
 
@@ -28,8 +28,9 @@ Tracking is handled by the NVIDIA NvDCF multi-object tracker. The AIP supports t
 | `src/nvdsinfer_customparser/` | Custom bounding-box parser plugin (`libnvds_infercustomparser.so`) for `nvinfer` |
 | `bin/build.sh` | Builds the custom parser plugin and the TensorRT engine with `trtexec` |
 | `localdev.ipynb` | Step-by-step build notebook: download weights → build → optional benchmark → validate → package → scan → pipeline test → dashboard |
+| `accuracy.ipynb` | Labelled detection evaluation: compare FP32/FP16 and the deployment engine on COCO-format data |
 | `presentation.ipynb` | Talk companion: AI Processor concepts, pipeline diagrams and benchmark results |
-| `tools/` | Notebook and CI helpers: `check_package.py` (exact package contents) and `benchmark.py` (fair ONNX Runtime/TensorRT benchmark) |
+| `tools/` | Notebook and CI helpers: package checks, inference latency benchmarks and labelled accuracy evaluation |
 | `doc/` | User manual and integration notes |
 | `doc/benchmarks/` | Reference benchmark results (JSON) and chart |
 | `tests/` | Offline tests for the notebook, tools and dashboard |
@@ -110,11 +111,12 @@ Options:
 - Step 8, `NR_PROJECT`: use a new name on a station that already has the default Node-RED
   project. The cell refuses to overwrite an existing project unless `OVERWRITE=1`.
 
-The pipeline test and dashboard are wired to a temporary `eais_*` pipeline, which step 9
-deletes. Repoint `AIP_PIPELINE_ID` to a permanent pipeline afterwards. Cleanup keeps
-`dist/` and the exported archive.
+The pipeline test and dashboard are wired to a temporary `eais_*` pipeline. Step 9
+deletes it only if cleanup is explicitly enabled. To keep the dashboard, select a
+permanent pipeline in the callback node. Cleanup keeps `dist/` and the exported archive.
 
-The notebook was executed top to bottom with both engine options on a Jetson Orin NX 16 GB
+The build and pipeline portions of an earlier notebook revision were exercised with both
+engine options on a Jetson Orin NX 16 GB
 (JetPack 6.0 / L4T R36.3, TensorRT 8.6.2, DeepStream 7.0, `eais-tools` 0.9.2), with the
 benchmark disabled. Activating and viewing the dashboard remains a manual step.
 
@@ -155,8 +157,9 @@ runs ONNX on CPU, so it is not a GPU-to-GPU reference.)
 In one Python process:
 
 - All variants run the same NMS-free graph. The deployment graph keeps NMS.
-- ONNX Runtime uses only `CUDAExecutionProvider` with `use_tf32=0`, matching the
-  engines' `--noTF32`; TensorRT FP16 is built with `--fp16 --noTF32`.
+- ONNX Runtime is configured to prefer `CUDAExecutionProvider` with `use_tf32=0`, matching
+  the engines' `--noTF32`; TensorRT FP16 is built with `--fp16 --noTF32`. ONNX Runtime may
+  still assign nodes to its CPU provider.
 - `trtexec` only builds the engines. The **actual `.engine` files** are executed by
   TensorRT's Python runtime (`execute_async_v3`). ONNX Runtime's TensorRT provider is not
   used: it would build its own engine instead of measuring the supplied one.
@@ -164,16 +167,21 @@ In one Python process:
 - Per request: `cudaDeviceSynchronize` → `perf_counter_ns` → one call →
   `cudaDeviceSynchronize`. 20 warm-up and 50 timed requests per round, 3 rounds, with
   backend order shuffled each round.
+- Before timing, the same ONNX Runtime session runs an **untimed profile** at each batch size.
+  The report counts unique executed nodes by provider and operator; profiling is stopped before
+  measurements. `disable_fallback()` alone does not prevent CPU graph partitioning.
 - Results: median, p95 and mean latency, ms/image, serial images/s and speed-up versus
-  ONNX Runtime at the same batch. Outputs are compared after timing. GPU load/frequency
-  and software versions are recorded; clocks and power mode are not changed.
+  ONNX Runtime at the same batch. Outputs are compared after timing. GPU load, frequency and
+  temperature are recorded around each round when available; clocks and power mode are not changed.
 
-MS8 has the TensorRT 8.6.2.3 libraries but no TensorRT Python bindings. The harness does
-not install anything system-wide: it downloads `python3-libnvinfer` at exactly the installed
-`libnvinfer8` version from the configured NVIDIA Jetson APT repository, checks its hash and
-exact dependencies, and extracts it under `tmp/`. A current PyPI `tensorrt` wheel would not
-match the station. Models, logs and results stay under `tmp/inference-benchmark/`, outside
-the AIP package. The benchmark does not use a model server or restart station services.
+An MS8 image can have the TensorRT libraries without Python bindings. If they are not already
+importable, the harness downloads `python3-libnvinfer` at exactly the installed `libnvinfer8`
+version from the configured NVIDIA Jetson APT repository, checks its hash and exact dependencies,
+and extracts it under `tmp/`; nothing is installed system-wide. A current PyPI `tensorrt` wheel
+would not match the station. The reference run used a previously extracted, checksum-verified
+matching package. The notebook keeps its models, logs and results under
+`tmp/inference-benchmark/`, outside the AIP package. The benchmark does not use a model server
+or restart station services.
 
 Reference run (Orin NX 16 GB, L4T R36.3, TensorRT 8.6.2, ONNX Runtime 1.19.0; median
 per-request latency, speed-up versus ONNX Runtime). Full results:
@@ -182,16 +190,85 @@ chart: [`doc/benchmarks/orin-nx-16gb-jp6.0.png`](doc/benchmarks/orin-nx-16gb-jp6
 
 | Batch | ONNX Runtime CUDA FP32 | TensorRT FP32 | TensorRT FP16 |
 |---|---|---|---|
-| 1 | 49.8 ms | 38.7 ms (1.29×) | 12.0 ms (4.15×) |
-| 4 | 181.9 ms | 125.7 ms (1.45×) | 34.6 ms (5.26×) |
-| 8 | 317.3 ms | 244.5 ms (1.30×) | 63.3 ms (5.01×) |
+| 1 | 22.3 ms | 16.6 ms (1.34×) | 4.7 ms (4.76×) |
+| 4 | 81.5 ms | 56.1 ms (1.45×) | 14.6 ms (5.58×) |
+| 8 | 139.2 ms | 108.0 ms (1.29×) | 27.1 ms (5.13×) |
 
-The station was running its normal workload (GPU load 55–90 %, clock 918 MHz), so
-absolute times are higher than on an idle device; compare ratios, and re-run for
-your own station. TensorRT FP32 matched ONNX Runtime closely (max raw score difference
-≈ 3×10⁻⁷). FP16 raw scores differed by at most 4×10⁻⁴; some raw box coordinates moved
-by up to 14 px. The input is random, so this is a numerical sanity check, not an
-accuracy evaluation.
+All station video pipelines were stopped for this run; other services were left running.
+Before the benchmark, GPU load was 0% over ten samples and temperature was 79.5–79.9 °C.
+During the measured rounds, sampled GPU frequency was 918 MHz and temperature was
+83.3–88.8 °C. These are sample points, not proof of an otherwise idle device; re-run for
+your own station. To isolate runtime contention, this run reused the exact graph and benchmark
+engines from the previous reference; it did not rebuild the engines under idle conditions. The
+benchmark does not stop pipelines itself.
+
+The ONNX Runtime profile observed **173 CUDA nodes and 9 CPU nodes** across batches 1, 4
+and 8. The CPU nodes were small `Gather`, `Unsqueeze` and `Concat` operations on integer
+shape tensors. Their execution and transfers are included in ONNX Runtime latency: this is
+a mixed-provider comparison, not a pure GPU-kernel comparison. TensorRT FP32 matched ONNX
+Runtime closely (max raw score difference ≈ 3×10⁻⁷). FP16 raw scores differed by at most
+4.2×10⁻⁴; some raw box coordinates moved by up to 14 px. The input is random, so this is
+a numerical sanity check, not an accuracy evaluation.
+
+### Labelled accuracy validation
+
+[`accuracy.ipynb`](accuracy.ipynb) complements the latency benchmark with a step-by-step
+evaluation of **labelled detections**. It compares ONNX Runtime FP32, TensorRT FP32 and
+TensorRT FP16 on the same COCO-format images and at batches 1, 4 and 8. The notebook can
+download COCO val2017 or use another dataset with `car`, `person` and `truck` categories.
+It can reuse the raw benchmark engines, or build them with the same profile and flags.
+
+The raw models share the same RGB resize, padding and low-threshold, class-aware
+postprocessing. [`tools/accuracy.py`](tools/accuracy.py) reports COCO mAP@0.50:0.95 and
+AP@0.50, per-class AP, and precision/recall at confidence 0.35 and IoU 0.50. It also
+compares FP16 against TensorRT FP32 with adjustable, provisional parity tolerances:
+at most 0.5 percentage points less mAP and 1 percentage point less recall for each class.
+These are relative checks, **not** evidence that the FP32 baseline is accurate enough.
+
+The actual deployment engine has embedded NMS with a 0.35 score threshold: its direct
+precision/recall are reported separately, while standard mAP is omitted because low-score
+detections have already been discarded. OpenCV preprocessing and NMS are not proven
+identical to DeepStream preprocessing or the TensorRT plugin. Direct engine evaluation
+does not exercise the DeepStream parser, tracking or callback.
+
+**Reference evaluation.** The same Orin NX / JetPack 6 stack evaluated all 5,000 COCO
+val2017 images with video pipelines stopped. The raw-model results below use the shared
+postprocessing described above; each batch is shown separately, rounded to two decimals.
+The [aggregate report](doc/benchmarks/orin-nx-16gb-jp6.0-accuracy.json) records the data
+fingerprints, engine hashes, method, all class metrics and parity comparisons. It contains
+neither dataset images nor per-image predictions.
+
+| Variant | mAP 50:95, batch 1 | batch 4 | batch 8 | AP 50, batch 1 |
+|---|---:|---:|---:|---:|
+| ONNX Runtime FP32 | 12.64% | 12.64% | 12.64% | 23.28% |
+| TensorRT FP32 | 12.64% | 12.64% | 12.64% | 23.28% |
+| TensorRT FP16 | 12.64% | 12.64% | 12.64% | 23.26% |
+
+The direct deployment engine produced these operating-point results at confidence ≥ 0.35
+and matching IoU ≥ 0.50 (batch 1; batches 4 and 8 round to the same values):
+
+| Class | Labelled objects | Precision | Recall |
+|---|---:|---:|---:|
+| car | 1,918 | 35.65% | 41.66% |
+| person | 10,777 | 66.27% | 23.96% |
+| truck | 414 | 22.58% | 15.22% |
+
+FP16 passed the provisional parity checks against TensorRT FP32 at all three batches,
+but **parity is not quality**: the absolute recalls above are low, especially for trucks.
+Investigate the model, preprocessing and confidence threshold, and evaluate the intended
+camera conditions before deciding whether the detector is suitable.
+
+For rollout, evaluate labelled, permission-cleared target-camera data and the complete
+pipeline as well. The notebook can score a separately captured per-frame detection file;
+the existing callback emits aggregated counts, not the boxes needed for that capture.
+Frame alignment, capture completeness, tracking and event/count accuracy require separate
+validation. The original model's training dataset and exact checkpoint are undocumented, so
+overlap with COCO validation cannot be ruled out. The accuracy notebook does not stop pipelines
+or change station services.
+
+For CPU-only regression tests, install [`tests/requirements-accuracy.txt`](tests/requirements-accuracy.txt)
+in a virtual environment and run `python3 -m unittest discover -s tests`. These tests do not
+replace a TensorRT or DeepStream run on the target station.
 
 ### Release CI
 
@@ -209,7 +286,8 @@ artifact without publishing a release.
 Engineering Reliable Edge AI Applications on Embedded GPUs*. It explains the AI Processor
 contract, the GPU pipeline, the ONNX-to-TensorRT path, fair measurement, reproducible
 packaging and layered validation, with diagrams and the benchmark chart above. Its live cells
-are disabled by default.
+are disabled by default. The separate [`accuracy.ipynb`](accuracy.ipynb) provides the
+hands-on labelled evaluation.
 
 ## Integrated Node-RED dashboard
 
@@ -221,14 +299,21 @@ UIBuilder application under [`dashboard/`](dashboard/). Together they provide:
 - per-source filtering;
 - ROI and line-crossing counters when those analytics are configured.
 
-Step 8 of [`localdev.ipynb`](localdev.ipynb) installs it as the Node-RED project
-`nodered-aipv1emi0001-dashboard`, wired to a pipeline. To install it by hand:
-copy `logic/` to a new project under the Node-RED projects directory, copy the
-contents of `dashboard/` into that project's `uibuilder/` directory and run
-`npm ci --omit=dev` there, then set `AIP_PIPELINE_ID` in the **AIPV1EMI0001
-Logic** tab's Environment properties and deploy. The Node-RED nodes
-(`@edge-ai/node-red-contrib-eais`, `node-red-contrib-uibuilder`) are
-preinstalled on EdgeAI Stations. Open the dashboard at
+The Node-RED runtime must load `@edgematrix/node-red-contrib-eais` **0.7.6**
+and UIBuilder. The project's locked local test install uses Node-RED 5 and
+requires Node.js 22.9 or later; this does not upgrade the station runtime.
+Some stations instead have the legacy
+`@edge-ai/node-red-contrib-eais`; the two EAIS variants must **not** coexist
+because they register the same node types. Arrange any migration and restart
+with the station administrator; see [`logic/README.md`](logic/README.md).
+
+Step 8 of [`localdev.ipynb`](localdev.ipynb) prepares the project
+`nodered-aipv1emi0001-dashboard`, preselecting its test pipeline. It installs
+the dashboard's browser dependencies, not the Node-RED runtime nodes. To
+install it by hand, copy `logic/` to a new Node-RED project, copy the contents
+of `dashboard/` into that project's `uibuilder/` directory and run
+`npm ci --omit=dev` there. Open the project, select the pipeline in the
+**AIPV1EMI0001 callback** node, and deploy. Open the dashboard at
 `https://<station>/ms5/aipv1emi0001_dash/` and assign `aipv1emi0001_dash` to
 users from Accounts management.
 
@@ -249,9 +334,9 @@ The model architecture is **YOLOv7** by WongKinYiu et al.:
 > *"YOLOv7: Trainable bag-of-freebies sets new state-of-the-art for real-time object detectors."*
 > CVPR 2023. <https://github.com/WongKinYiu/yolov7> — GPL-3.0 License.
 
-This is a general-purpose YOLOv7-tiny integration adapted by EdgeMatrix for EdgeAI Station,
-exposing `car`, `person` and `truck`. It is not a parking-lot-specific model.
-The exact upstream checkpoint provenance of the published export is not documented here.
+This YOLOv7-tiny integration was adapted by EdgeMatrix for EdgeAI Station and exposes
+`car`, `person` and `truck`. The trainer, training dataset, intended training domain and
+complete checkpoint provenance of the published export remain unverified.
 
 ## Contributors
 

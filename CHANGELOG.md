@@ -7,12 +7,18 @@
 - feat: Move the package checks and the benchmark harness to `tools/check_package.py` and `tools/benchmark.py`; publish the reference results under `doc/benchmarks/`
 - ci: Validate the release package and archive with `tools/check_package.py`
 - test: Add offline tests for the notebooks, tools and published benchmark results
+- fix: Preserve model files and TensorRT timing caches that existed before a notebook run
+- docs: Refresh the inference benchmark with pipelines stopped and report observed CPU/GPU node placement
+- feat: Add a labelled detection accuracy tutorial and evaluator alongside the inference latency benchmark
+- docs: Publish the full COCO validation reference, including per-class detection metrics and limitations
+- ci: Install CPU evaluation dependencies so accuracy regression tests run in release validation
 - feat: Compare ONNX Runtime CUDA and TensorRT FP32/FP16 using a shared timing harness
 - fix: Validate configuration and distribution file hashes with EAIS Tools
 - ci: Publish release archives and checksums to GitHub Releases
 - fix: Clearly distinguish latest callback counts from delayed HLS playback; defer inferred synchronization
 - fix: Exclude manual snapshots and unused browser command wiring from the dashboard
-- chore: Pin `@edge-ai/node-red-contrib-eais` 0.6.24 for Node-RED integration
+- chore: Pin the public `@edgematrix/node-red-contrib-eais` 0.7.6 for Node-RED integration
+- fix: Select the callback pipeline directly to avoid the 0.7.6 editor's environment-reference issue
 - docs: Describe the general-purpose EdgeAI Station integration without parking-dataset training claims
 - fix: Rename the ONNX download to `yolov7tiny-640.onnx` across Hugging Face, the notebook and build script
 
