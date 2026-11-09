@@ -6,7 +6,7 @@
     <title>YOLOv7 Object Counts</title>
     <meta name="description" content="Live AIPV1EMI0001 object-counting dashboard">
     <link rel="stylesheet" href="./index.css">
-    <script type="module" async src="./index.js"></script>
+    <script type="module" src="./bootstrap.js"></script>
 </head>
 <body>
     <!--
@@ -16,7 +16,11 @@
       FIRST VIEWPORT: Identity and connection state above a dominant 16:9 feed with a dense count console fixed beside it.
       FORM: Split-screen operations console, user-pinned direction; seed: user-pinned.
     -->
-    <div id="app">
+    <div id="dashboard-startup" class="startup" role="status">
+        <h1>Object counting</h1>
+        <p id="dashboard-startup-message">Loading dashboard. Make sure JavaScript is enabled.</p>
+    </div>
+    <div id="app" v-cloak>
         <header class="header">
             <div>
                 <div class="title-line">
@@ -49,14 +53,21 @@
             <section class="hero-grid">
                 <article class="video-card">
                     <div class="card-heading">
-                        <h2>Pipeline playback</h2>
+                        <h2>Live video</h2>
                         <span class="pill" :class="'video-' + videoState">{{ videoState }}</span>
                     </div>
                     <div class="video-frame">
-                        <video v-if="hlsUrl" ref="video" muted autoplay playsinline controls></video>
-                        <div v-else class="empty">Waiting for a pipeline identifier.</div>
+                        <video v-if="pipeline.id" ref="video" muted autoplay playsinline
+                            :controls="videoState === 'playing' || videoState === 'ready'"></video>
+                        <p v-if="!pipeline.id" class="video-overlay" role="status">Waiting for a pipeline.</p>
+                        <p v-else-if="videoState === 'loading' || videoState === 'waiting'" class="video-overlay" role="status">Connecting to video…</p>
+                        <div v-else-if="videoState === 'error' || videoState === 'disconnected' || videoState === 'disabled'"
+                            class="video-overlay" role="status">
+                            <p :class="{ 'video-overlay-error': videoState !== 'disabled' }">{{ videoError || "Video disconnected." }}</p>
+                            <button type="button" class="video-retry" @click="connectVideo(true)">Retry video</button>
+                        </div>
                     </div>
-                    <p class="playback-note">Delayed HLS video. Counts show the latest received metadata and are not synchronized with this playback.</p>
+                    <p v-if="videoState === 'ready' && videoError" class="video-hint" role="status">{{ videoError }}</p>
                 </article>
 
                 <article class="counter-panel">
@@ -115,7 +126,7 @@
     </div>
 
     <script nomodule>
-        document.getElementById("app").textContent = "This dashboard requires JavaScript modules.";
+        document.getElementById("dashboard-startup-message").textContent = "This dashboard requires JavaScript modules.";
     </script>
 </body>
 </html>

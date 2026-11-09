@@ -14,6 +14,7 @@
 }
 
 * { box-sizing: border-box; }
+[v-cloak] { display: none; }
 
 body {
     margin: 0;
@@ -28,6 +29,17 @@ body {
 }
 
 button, select { font: inherit; }
+
+.startup {
+    width: min(36rem, calc(100% - 2rem));
+    margin: clamp(2rem, 10vh, 6rem) auto;
+    padding: 1.5rem;
+    border: 1px solid var(--line);
+    border-radius: 1rem;
+    background: var(--panel);
+}
+.startup h1 { font-size: 1.5rem; }
+.startup p { margin-top: 0.6rem; color: var(--muted); }
 
 #app {
     width: min(1480px, 100%);
@@ -119,7 +131,6 @@ select:focus-visible {
     text-transform: uppercase;
 }
 .video-playing { color: var(--green); border-color: var(--green); }
-.video-error, .video-unsupported { color: var(--red); border-color: var(--red); }
 
 .video-frame {
     display: grid;
@@ -129,7 +140,37 @@ select:focus-visible {
     border-radius: 0.7rem;
     background: #02060b;
 }
+.video-frame > * { grid-area: 1 / 1; }
 .video-frame video { width: 100%; height: 100%; object-fit: contain; }
+.video-overlay {
+    max-width: 32rem;
+    padding: 1.5rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    text-align: center;
+}
+.video-overlay-error { color: #ffb3b3; }
+.video-retry {
+    margin-top: 1rem;
+    padding: 0.6rem 1rem;
+    border: 1px solid var(--line);
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+}
+.video-retry:hover { border-color: var(--muted); }
+.video-retry:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+
+.video-loading, .video-ready { color: var(--amber); border-color: var(--amber); }
+.video-error, .video-disconnected { color: var(--red); border-color: var(--red); }
+.video-hint {
+    margin-top: 0.75rem;
+    color: var(--muted);
+    font-size: 0.84rem;
+    line-height: 1.5;
+}
 
 .counter-panel {
     display: flex;
@@ -199,5 +240,4 @@ select:focus-visible {
     .pulse { animation: none; }
 }
 
-.playback-note { margin-top: 0.75rem; color: var(--muted); font-size: 0.85rem; line-height: 1.5; }
 .toolbar { flex-wrap: wrap; }

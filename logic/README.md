@@ -64,20 +64,16 @@ is included in this flow. If a new UIBuilder instance is not served after
 deployment, follow the station's UIBuilder instructions; a Node-RED restart
 may be required.
 
-## Playback and metadata
+## Video and metadata
 
-The dashboard displays the latest received metadata independently of the delayed
-HLS video. They are **not synchronized**. For batched delivery the normalizer uses
-the last window in the batch; counts are window maxima where applicable, not
-necessarily per-frame values. The timestamp is the normalization time, not the
-video frame's capture time.
-
-Segment-name/frame-number synchronization is not included: variable durations,
-pipeline restarts, and differing source clocks make that inference unreliable.
-Accurate alignment requires a shared timing contract between video and metadata.
-The dashboard neither buffers callback windows for alignment nor sends commands
-back to the station. A station snapshot would capture a newer frame than the one
-visible in HLS, so manual snapshot controls and their wiring are excluded.
+The dashboard reads the pipeline's output settings from MS3 and automatically
+uses HLS or WebRTC, with the same HLS precedence as the station web UI.
+Enable the required output in the pipeline; there is no dashboard transport selector.
+Counts are the latest received metadata. For batched delivery the normalizer
+uses the last window in the batch; counts are window maxima where applicable,
+not necessarily per-frame values. The timestamp is the normalization time, not
+the video frame's capture time. No frame-level alignment is applied, and the
+dashboard sends no commands back to the station.
 
 ## Regression checks
 
@@ -106,7 +102,6 @@ The normalizer sends:
   "timestamp": "2026-09-25T00:00:00.000Z",
   "aggregation": "latest frame or merge-window maximum",
   "pipeline": {"id": "...", "name": "..."},
-  "hlsUrl": "/ms3/pipeline/<pipeline-id>/hls",
   "sources": [
     {
       "id": "0",

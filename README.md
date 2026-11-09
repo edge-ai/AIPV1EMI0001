@@ -22,7 +22,7 @@ Tracking is handled by the NVIDIA NvDCF multi-object tracker. The AIP supports t
 | `store.json` | EdgeAI Store listing metadata |
 | `callback.py` | User callback — transforms DeepStream batch metadata into AIP metadata |
 | `logic/` | Importable Node-RED project: callback subscription and count normalization |
-| `dashboard/` | Offline Vue 3 UIBuilder SPA with HLS, class, ROI and line-crossing views |
+| `dashboard/` | Offline Vue 3 UIBuilder SPA with pipeline-selected HLS/WebRTC video, class, ROI and line-crossing views |
 | `configs/` | DeepStream inference config (`nvinferserver` / Triton) and NvDCF tracker config |
 | `models/AIPV1EMI0001_Yolo_Detector/` | Triton model repository: `config.pbtxt`, labels. Model weights are **not** stored here — they are downloaded from Hugging Face (see below) |
 | `src/nvdsinfer_customparser/` | Custom bounding-box parser plugin (`libnvds_infercustomparser.so`) for `nvinfer` |
@@ -77,7 +77,7 @@ flowchart LR
     TRK --> ANA["Analytics<br/>ROI, line crossing"]
     ANA --> CB["callback.py"]
     CB --> NR["Node-RED<br/>logic/"]
-    NR --> UI["Dashboard<br/>counts + HLS video"]
+    NR --> UI["Dashboard<br/>counts + pipeline video"]
 ```
 
 Frames stay in GPU memory from decode to analytics; only metadata reaches Python.
@@ -322,7 +322,8 @@ hands-on labelled evaluation.
 The AIP package includes a Node-RED project under [`logic/`](logic/) and its
 UIBuilder application under [`dashboard/`](dashboard/). Together they provide:
 
-- live HLS playback from `/ms3/pipeline/<pipeline-id>/hls`;
+- live video using HLS or WebRTC automatically from the pipeline's output
+  settings, matching the station web UI without a transport selector;
 - per-class counts for `car`, `person`, and `truck`;
 - per-source filtering;
 - ROI and line-crossing counters when those analytics are configured.

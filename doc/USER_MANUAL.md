@@ -32,7 +32,8 @@ and `configs/config_tracker_NvDCF_perf.yml` (NvDCF tracker parameters).
 The AIP archive contains a Node-RED project in `logic/` and an offline Vue 3
 UIBuilder application in `dashboard/`. The dashboard shows:
 
-- the pipeline HLS stream;
+- the pipeline video stream (HLS or WebRTC, selected automatically from the
+  enabled pipeline outputs, with HLS precedence as in the station web UI);
 - live `car`, `person`, and `truck` counts;
 - a combined or per-source view;
 - ROI and line-crossing counts when those analytics are configured.

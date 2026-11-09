@@ -15,7 +15,7 @@ time.
 ## Product Purpose
 
 AIPV1EMI0001 is a self-contained AI Processor vertical for real-time YOLOv7
-object detection. Its bundled Node-RED logic and dashboard make the live HLS
+object detection. Its bundled Node-RED logic and dashboard make the live video
 stream, class counts, ROI counts, and line-crossing counts directly observable
 from the station web UI.
 
@@ -37,14 +37,15 @@ the result to the browser.
 - Detects `car`, `person`, and `truck`.
 - Supports up to 8 input streams.
 - Supports ROI and line-crossing analytics when configured on the pipeline.
-- Uses the authenticated MS3 HLS endpoint for video.
+- Uses HLS or WebRTC according to the pipeline output settings, with the same
+  HLS precedence as the station web UI and no dashboard transport selector.
 - Must work offline; browser dependencies are installed locally through
   UIBuilder and no CDN is permitted.
 - The dashboard is a Vue 3 single-page application with no build step.
 - Callback payload shape varies with MS3 merge and push configuration, so
   Node-RED owns normalization and the browser consumes a stable envelope.
 - Snapshot controls are excluded: a new live snapshot would not match the
-  delayed HLS frame currently displayed.
+  frame currently displayed.
 
 ## Evidence on Hand
 

@@ -10,6 +10,7 @@ dashboard/package.json
 dashboard/package-lock.json
 dashboard/aipv1emi0001_dash/package.json
 dashboard/aipv1emi0001_dash/src/index.html
+dashboard/aipv1emi0001_dash/src/bootstrap.js
 dashboard/aipv1emi0001_dash/src/index.js
 dashboard/aipv1emi0001_dash/src/index.css
 doc/README.md

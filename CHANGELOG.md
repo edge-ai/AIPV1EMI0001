@@ -18,7 +18,7 @@
 - feat: Compare ONNX Runtime CUDA and TensorRT FP32/FP16 using a shared timing harness
 - fix: Validate configuration and distribution file hashes with EAIS Tools
 - ci: Publish release archives and checksums to GitHub Releases
-- fix: Clearly distinguish latest callback counts from delayed HLS playback; defer inferred synchronization
+- feat: Automatically select dashboard HLS or WebRTC playback from pipeline settings, matching the station web UI without a transport selector; counts remain the latest received metadata
 - fix: Exclude manual snapshots and unused browser command wiring from the dashboard
 - chore: Pin the public `@edgematrix/node-red-contrib-eais` 0.7.10 and isolate the Node-RED test runtime from the distributable project
 - fix: Select the callback pipeline directly to avoid the 0.7.6 editor's environment-reference issue

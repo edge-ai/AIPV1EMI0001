@@ -37,7 +37,9 @@ below, these regions stack into one column without changing the reading order.
 ## Components and states
 
 - Panels use one radius, border, and surface treatment.
-- Status pills communicate HLS loading, ready, playing, unsupported, and error.
+- Status pills communicate video waiting, loading, ready, playing, disabled, disconnected, and error.
+- The player follows pipeline output settings; no HLS/WebRTC selector is shown.
+- Video errors expose a retry action; disabled outputs show a placeholder.
 - The source selector uses the browser's standard control behavior.
 - Empty states explain what data or pipeline configuration is missing.
 - Motion is limited to the waiting-state pulse and respects reduced-motion.

@@ -439,6 +439,7 @@ class NotebookBehaviourTests(unittest.TestCase):
             tracked = subprocess.run(["git", "-C", str(project), "ls-files"], capture_output=True,
                                      text=True, check=True).stdout.split()
             self.assertIn("uibuilder/aipv1emi0001_dash/src/index.js", tracked)
+            self.assertIn("uibuilder/aipv1emi0001_dash/src/bootstrap.js", tracked)
             self.assertFalse([name for name in tracked if "node_modules" in name or "cred" in name])
             self.assertNotEqual(station.run("nodered", PIPELINE_ID="P1").returncode, 0, "must not overwrite")
 
@@ -601,7 +602,7 @@ class PresentationTests(unittest.TestCase):
         self.assertIn("neither notebook trains a model from scratch", presentation.lower())
         self.assertIn("Neither notebook trains a model from scratch", presentation)
         self.assertIn("configuration files", presentation)
-        self.assertIn("encoded HLS video follows a separate path", presentation)
+        self.assertIn("encoded HLS or WebRTC video follows a separate path", presentation)
         self.assertIn("not a model-training walkthrough or blank project",
                       " ".join(MARKDOWN.split()))
         self.assertIn("Learning goals", MARKDOWN)

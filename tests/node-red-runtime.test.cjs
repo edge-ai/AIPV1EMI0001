@@ -147,7 +147,7 @@ test("EAIS 0.7.10 supports callback selection and metrics with mocked station se
             assert.equal(dashboard[index].payload.pipeline.name, "Fixture pipeline");
             assert.equal(dashboard[index].payload.sources[0].name, "Gate");
             assert.equal(dashboard[index].payload.totals.objects, fixture.count);
-            assert.equal(dashboard[index].payload.hlsUrl, "/ms3/pipeline/fixture-pipeline/hls");
+            assert.equal(dashboard[index].payload.hlsUrl, undefined);
         }
 
         failMetadata = true;
