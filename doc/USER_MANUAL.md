@@ -80,6 +80,7 @@ entry per input source:
 [
   {
     "source_id": 0,
+    "available": true,
     "frame_num": 1234,
     "num_obj_meta": 3,
     "ntp_timestamp": 1760000000000,
@@ -93,7 +94,7 @@ entry per input source:
 - `obj_counter` — per-class detection counts in this frame, ordered as
   `["car", "person", "truck"]` (the `labels-rev3.txt` order).
 - `objInROIcnt` / `objLCCurrCnt` — per-label counts from the ROI / LCC analytics
-  plugins (`{}` when no analytics are configured on the pipeline).
+  plugins (`{}` when no analytics values were reported for the frame).
 
 ### Merge mode (merge enabled, default 1 s window)
 
@@ -103,6 +104,7 @@ entry per input source:
 {
   "0": {
     "source_id": 0,
+    "available": true,
     "frame_number_from": 1200,
     "frame_number_to": 1234,
     "ntp_timestamp_from": 1759999999000,
@@ -120,9 +122,28 @@ entry per input source:
 }
 ```
 
+`available` is true if the source had at least one frame in the window. If it
+had no frames, timestamps and each class statistic are `null` and analytics maps
+are empty. In passthrough mode, the missing source has `available: false`,
+`null` frame fields, an `obj_counter` array of `null` values and `null`
+analytics fields. Missing frames within an otherwise available window are
+excluded; they do not become zero observations. On station runtimes that
+provide configured input IDs, only those IDs are reported, even when they are
+sparse or the batch capacity is larger. Without that mapping, the callback
+falls back to the batch's reported source slots.
+
+Class `count_val` is the sum of per-frame counts, not a unique-object count;
+the mean and median are rounded to the nearest integer. ROI and line-crossing
+statistics include only values reported for that label. A label absent from the
+window is omitted, which does not establish whether an analytic is configured.
+The dashboard's all-source totals sum per-source maxima, not necessarily
+simultaneous observations; if a source is unavailable those totals are `N/A`.
+
 With periodic push enabled, multiple merge results are batched into time-windowed
 records (`since` / `until` / `data`). Inspect a live message with a Node-RED debug
-node before writing downstream bindings.
+node before writing downstream bindings. If callbacks stop entirely, no new
+availability update is emitted: monitor the metadata timestamp and station
+pipeline health separately.
 
 ## Model
 

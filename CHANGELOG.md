@@ -3,6 +3,8 @@
 ## v6.1.0 - Unreleased
 
 - docs: Rewrite `localdev.ipynb` as a command-first build guide based on `eais-tools`, with Mermaid diagrams of the AIP, the runtime pipeline and the build steps
+- fix: Distinguish missing callback frames from zero detections and aggregate only reported analytics values
+- ci: Check pull requests and pin the Hugging Face model revision used by notebooks and releases
 - docs: Add `presentation.ipynb`, a talk companion on engineering Edge AI applications, with the reference benchmark chart
 - feat: Move the package checks and the benchmark harness to `tools/check_package.py` and `tools/benchmark.py`; publish the reference results under `doc/benchmarks/`
 - ci: Validate the release package and archive with `tools/check_package.py`

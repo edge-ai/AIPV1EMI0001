@@ -9,7 +9,7 @@ createApp({
         return {
             connected: false,
             sources: [],
-            totals: { objects: 0, classes: {}, roi: {}, lineCrossing: {} },
+            totals: { objects: null, classes: {}, roi: {}, lineCrossing: {} },
             pipeline: { id: "", name: "" },
             hlsUrl: "",
             aggregation: "",
@@ -59,7 +59,7 @@ createApp({
         classCards() {
             const preferred = ["car", "person", "truck"];
             const labels = [...new Set([...preferred, ...Object.keys(this.scopedClasses || {})])];
-            return labels.map((label) => ({ label, value: Number(this.scopedClasses?.[label] || 0) }));
+            return labels.map((label) => ({ label, value: this.formatCount(this.scopedClasses?.[label]) }));
         },
 
         roiRows() {
@@ -78,10 +78,18 @@ createApp({
     },
 
     methods: {
+        formatCount(value) {
+            return typeof value === "number" && Number.isFinite(value) ? value : "N/A";
+        },
+
         toRows(values) {
             return Object.entries(values || {})
-                .map(([label, value]) => ({ label, value: Number(value) || 0 }))
-                .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label));
+                .map(([label, value]) => ({ label, value: this.formatCount(value) }))
+                .sort((left, right) => {
+                    const leftValue = typeof left.value === "number" ? left.value : -Infinity;
+                    const rightValue = typeof right.value === "number" ? right.value : -Infinity;
+                    return rightValue - leftValue || left.label.localeCompare(right.label);
+                });
         },
 
         applyMessage(msg) {
@@ -89,7 +97,7 @@ createApp({
             if (!data || data.type !== "aipv1emi0001.metrics" || !Array.isArray(data.sources)) return;
 
             this.sources = data.sources;
-            this.totals = data.totals || { objects: 0, classes: {}, roi: {}, lineCrossing: {} };
+            this.totals = data.totals || { objects: null, classes: {}, roi: {}, lineCrossing: {} };
             this.pipeline = data.pipeline || { id: "", name: "" };
             this.aggregation = data.aggregation || "";
             this.lastUpdate = new Date(data.timestamp || Date.now());

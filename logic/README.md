@@ -26,10 +26,7 @@ an approved time. Confirm the loaded package and version in **Manage palette**
 before deploying this flow.
 
 On a fresh, unmanaged Node-RED instance with no legacy EAIS package, install
-the nodes from the Node-RED user directory and restart Node-RED. npm may also
-install a Node-RED peer if one is not already present; check its Node.js
-requirement. Currently, npm can resolve Node-RED 5, which requires Node.js
-22.9 or later:
+the nodes from the Node-RED user directory and restart Node-RED:
 
 ```bash
 npm install --save-exact --registry=https://registry.npmjs.org/ \
@@ -84,12 +81,20 @@ visible in HLS, so manual snapshot controls and their wiring are excluded.
 
 ## Regression checks
 
-From the repository root, run `node --test tests/dashboard.test.cjs`. These
+From the repository root, run `node --test tests/dashboard.test.cjs tests/missing-metrics.test.cjs`. These
 dependency-free checks cover callback delivery shapes, latest-window selection,
 dashboard message handling, flow references, and the integration package file set.
 To exercise the pinned EAIS node in a local Node-RED runtime with mocked station
-services, run `npm ci --prefix logic --ignore-scripts` in a development checkout,
-then `node --test tests/node-red-runtime.test.cjs`. This does not test a live station.
+services, run the following in a development checkout:
+
+```bash
+npm ci --prefix logic --ignore-scripts
+npm ci --prefix tests/node-red-runtime --include=dev --ignore-scripts
+node --test tests/node-red-runtime.test.cjs
+```
+
+The second install is a test-only runtime, not a station deployment. The test
+does not exercise a live station.
 
 ## Output contract
 
@@ -106,6 +111,7 @@ The normalizer sends:
     {
       "id": "0",
       "name": "Camera 1",
+      "available": true,
       "counts": {"car": 4, "person": 2, "truck": 1},
       "total": 7,
       "roi": {"parking": 3},
@@ -122,4 +128,10 @@ The normalizer sends:
 ```
 
 For merged callback data, the displayed count is `max_val` from the latest
-merge window. For passthrough data, it is the latest frame count.
+merge window. For passthrough data, it is the latest frame count. A source
+with no observed frames has `available: false` and `null` class counts and
+total; the all-source totals are also `null` when any source is unavailable.
+The dashboard displays these values as `N/A`. Analytics labels are reported
+only when their values were observed; absence does not prove that an analytic
+is unconfigured. Totals combine reported per-source values and need not
+represent a simultaneous frame. The timestamp is not a freshness alarm.

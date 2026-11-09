@@ -43,6 +43,11 @@ Tracking is handled by the NVIDIA NvDCF multi-object tracker. The AIP supports t
   - TensorRT (`trtexec`)
   - CUDA toolkit (to build the custom parser plugin)
 
+The manifest lists EX3, EX5 and EX7 targets. The documented build and pipeline
+checks have been exercised on an Orin NX 16 GB with JetPack 6.0 / L4T R36.3,
+TensorRT 8.6.2 and DeepStream 7.0; the other targets have not been independently
+verified. TensorRT engines are hardware- and runtime-specific.
+
 ## Model weights
 
 The trained weights are not stored in this repository. They are published on Hugging Face at
@@ -54,9 +59,12 @@ The trained weights are not stored in this repository. They are published on Hug
 | `yolov7-fp16-1x8x8-jp6-l4t36.3-arm64.engine` | Prebuilt TensorRT FP16 engine (JetPack 6 / L4T R36.3 / aarch64 only) |
 | `SHA256SUMS` | Checksums for download verification |
 
-The weights are licensed under **GPL-3.0**, matching the upstream YOLOv7 training code.
+The published weights declare **GPL-3.0** ([`LICENSE.weights`](LICENSE.weights)).
+The trainer, dataset and complete checkpoint provenance have not been independently
+documented.
 
-The `localdev.ipynb` notebook downloads the ONNX and verifies it automatically.
+The notebooks and release workflow download from a fixed Hugging Face revision and
+verify each artifact's SHA-256 checksum.
 
 ## How it works
 
@@ -75,6 +83,16 @@ flowchart LR
 Frames stay in GPU memory from decode to analytics; only metadata reaches Python.
 `nvinferserver` runs the Triton runtime **inside** the DeepStream process, with no network
 hop to a separate model server.
+
+### Callback output
+
+The callback emits per-source frame counts or merge-window statistics. `available`
+is `false` when a source has no frame in the window; its class statistics are `null`,
+not zero. ROI and line-crossing statistics use only reported values; an unreported
+label is omitted rather than assumed to be zero. `count_val` is the sum of per-frame
+class counts, not a count of unique tracked objects. The dashboard displays
+unavailable values as `N/A`; the latest metadata timestamp is not a freshness alarm.
+See the [callback contract](doc/USER_MANUAL.md#callback-output-metadata-contract) for the full shape.
 
 ## Build, package & deploy
 
@@ -95,18 +113,23 @@ flowchart TD
     S8 --> S9["9. Cleanup"]
 ```
 
-Run it in the station's Jupyter environment (App-Builder) from a clone at
+On a fresh station, run it in the Jupyter environment (App-Builder) from a clone at
 `/data/aip/AIPV1EMI0001`:
 
 ```bash
+[ ! -e /data/aip/AIPV1EMI0001 ] || { echo "AIP directory already exists; coordinate the upgrade"; exit 1; }
 cd /data/aip && git clone https://github.com/edge-ai/AIPV1EMI0001.git
 ```
+
+The station watches `/data/aip`. Do not move, replace or remove an existing AIP
+directory as a setup shortcut: coordinate upgrades with the station administrator.
 
 Options:
 
 - Step 0, `ENGINE_SOURCE = "build"` compiles the FP16 engine from the ONNX with `trtexec`.
   Allow 30–60 minutes on a busy Orin NX. `"prebuilt"` downloads the engine from Hugging Face
-  instead (JetPack 6 / L4T R36.3 / TensorRT 8.6.2 only).
+  instead (built and tested on the Orin NX stack above). The download checks the
+  TensorRT version; the later engine-load smoke test checks this device.
 - Step 0, `RUN_BENCHMARKS = True` enables section 3. It is off by default.
 - Step 8, `NR_PROJECT`: use a new name on a station that already has the default Node-RED
   project. The cell refuses to overwrite an existing project unless `OVERWRITE=1`.

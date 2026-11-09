@@ -66,8 +66,9 @@
                     </div>
                     <div class="total-row">
                         <span>All objects</span>
-                        <strong>{{ scopedTotal }}</strong>
+                        <strong>{{ formatCount(scopedTotal) }}</strong>
                     </div>
+                    <p v-if="sources.length && scopedTotal == null" class="hint" role="status">Some metrics are unavailable for this window.</p>
                     <div class="class-list" aria-label="Object counts by class">
                         <div v-for="item in classCards" :key="item.label" class="class-row">
                             <span class="class-name">
@@ -90,7 +91,7 @@
                             <span>{{ row.label }}</span><strong>{{ row.value }}</strong>
                         </div>
                     </div>
-                    <div v-else class="empty compact">No ROI is defined for this pipeline.</div>
+                    <div v-else class="empty compact">No ROI data in the latest window.</div>
                 </article>
 
                 <article class="detail-card">
@@ -102,7 +103,7 @@
                             <span>{{ row.label }}</span><strong>{{ row.value }}</strong>
                         </div>
                     </div>
-                    <div v-else class="empty compact">No line counter is defined for this pipeline.</div>
+                    <div v-else class="empty compact">No line-crossing data in the latest window.</div>
                 </article>
             </section>
 

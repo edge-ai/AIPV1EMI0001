@@ -40,6 +40,11 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Set up Node.js for dashboard checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Install CPU accuracy test dependencies
         run: python3 -m pip install -r tests/requirements-accuracy.txt
 
@@ -48,11 +53,6 @@ jobs:
           python3 -c 'import cv2, numpy, onnxruntime, pycocotools._mask'
           python3 -m unittest discover -s tests
 
-      - name: Set up Node.js for dashboard checks
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
       - name: Install public Node-RED integration dependencies
         run: |
           npm ci --prefix logic --omit=dev --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org/
@@ -60,11 +60,11 @@ jobs:
           npm ci --prefix tests/node-red-runtime --include=dev --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org/
 
       - name: Check dashboard integration
-        run: node --test tests/dashboard.test.cjs tests/node-red-runtime.test.cjs
+        run: node --test tests/*.test.cjs
 
       - name: Download model weights from Hugging Face
         run: |
-          HF_BASE="https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/main"
+          HF_BASE="https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/2f7dbaf4fa12b301e90f2e83c8e417ea34ead4cc"
           MODEL_DIR="models/AIPV1EMI0001_Yolo_Detector"
           mkdir -p "$MODEL_DIR/1"
           curl -fL "$HF_BASE/yolov7-fp16-1x8x8-jp6-l4t36.3-arm64.engine" -o "$MODEL_DIR/1/yolov7-fp16-1x8x8.engine"
