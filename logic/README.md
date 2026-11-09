@@ -6,16 +6,17 @@ to the bundled UIBuilder dashboard.
 
 ## Runtime requirements
 
-The Node-RED runtime must load `@edgematrix/node-red-contrib-eais` **0.7.6**
+The Node-RED runtime must load `@edgematrix/node-red-contrib-eais` **0.7.10**
 and `node-red-contrib-uibuilder` before this project is deployed. The EAIS
 package requires Node-RED 4 or later, Node.js 20 or later, and npm 10 or later.
 The project manifest also pins UIBuilder 7.5.0. The installed Node-RED version
 can require a newer Node.js version than the EAIS package itself.
 
-The project's lockfile resolves the Node-RED peer to **5.0.7**, which requires
-Node.js **22.9 or later**. Use that Node.js version for `npm ci --prefix logic`
-and the local integration checks below. This does not upgrade a separately
-managed station runtime.
+The EAIS package declares Node-RED as an optional peer, so it does not install
+a separate runtime. The local integration-test harness separately pins Node-RED
+**4.1.13** and is checked with Node.js **22**. Install that harness only in a
+development checkout; it does not install or upgrade the separately managed
+station runtime.
 
 Some stations have the legacy `@edge-ai/node-red-contrib-eais` installed. It
 registers the same node types as the public package: **do not install both
@@ -32,7 +33,7 @@ requirement. Currently, npm can resolve Node-RED 5, which requires Node.js
 
 ```bash
 npm install --save-exact --registry=https://registry.npmjs.org/ \
-  @edgematrix/node-red-contrib-eais@0.7.6 node-red-contrib-uibuilder@7.5.0
+  @edgematrix/node-red-contrib-eais@0.7.10 node-red-contrib-uibuilder@7.5.0
 ```
 
 Copying this project's `package.json` records its dependencies; it does not
@@ -46,10 +47,11 @@ by itself install or activate them in the Node-RED runtime. The notebook's
 3. Deploy. Repeat these steps when switching pipelines.
 
 The checked-in flow deliberately leaves the pipeline selection empty; the
-notebook preselects its test pipeline in the installed copy. Version 0.7.6
-can replace a `${...}` pipeline reference with its `__NA__` editor sentinel
-when the callback dialog is saved, so select a pipeline rather than putting an
-environment-variable reference in that field.
+notebook preselects its test pipeline in the installed copy. Select a pipeline
+in the callback node rather than putting an environment-variable reference in
+that field. When Node-RED admin authentication is enabled, the pipeline selector
+requires `flows.read` permission, and refreshing the callback metadata cache
+requires `flows.write`.
 
 `flows_cred.json` is not part of this project. If credentials are needed, set
 Node-RED's `credentialSecret` through the station deployment environment and

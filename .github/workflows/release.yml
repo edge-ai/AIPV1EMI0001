@@ -54,7 +54,10 @@ jobs:
           node-version: '22'
 
       - name: Install public Node-RED integration dependencies
-        run: npm ci --prefix logic --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org/
+        run: |
+          npm ci --prefix logic --omit=dev --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org/
+          test ! -e logic/node_modules/node-red/package.json
+          npm ci --prefix tests/node-red-runtime --include=dev --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org/
 
       - name: Check dashboard integration
         run: node --test tests/dashboard.test.cjs tests/node-red-runtime.test.cjs

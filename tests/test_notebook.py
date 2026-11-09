@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
+AIP_VERSION = json.loads((ROOT / "manifest.json").read_text())["version"]
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "tests"))
 
@@ -174,6 +175,18 @@ class NotebookStructureTests(unittest.TestCase):
         for topic in ("nvinferserver", "NvDCF", "nvtracker", "callback.py", ".include"):
             self.assertIn(topic, MARKDOWN)
 
+    def test_documented_node_red_version_matches_project(self):
+        package = json.loads((ROOT / "logic/package.json").read_text())
+        version = package["dependencies"]["@edgematrix/node-red-contrib-eais"]
+        for name in ("README.md", "logic/README.md", "doc/USER_MANUAL.md"):
+            with self.subTest(document=name):
+                self.assertIn(version, (ROOT / name).read_text())
+        self.assertIn(version, NOTEBOOK["nodered-md"][1])
+
+    def test_changelog_covers_manifest_version(self):
+        changelog = (ROOT / "CHANGELOG.md").read_text()
+        self.assertRegex(changelog, rf"(?m)^## v{re.escape(AIP_VERSION)}(?: - .+)?$")
+
     def test_artifact_names_match_build_script_and_package(self):
         setup = CODE["setup"]
         onnx = re.search(r'ONNX=f"\{MODEL_DIR\}/([^"]+)"', setup)[1]
@@ -266,10 +279,10 @@ class NotebookBehaviourTests(unittest.TestCase):
                     self.assertIn("archive AIPV1EMI0001_dist.tgz matches", export.stdout)
 
     def test_registration_scans_only_the_target_without_forcing(self):
-        aip = {"pk": "aip-pk", "unique_id": "AIPV1EMI0001", "version": "6.0.0"}
+        aip = {"pk": "aip-pk", "unique_id": "AIPV1EMI0001", "version": AIP_VERSION}
         with tempfile.TemporaryDirectory() as directory:
             station = Station(directory, {"AIPV1EMI0001": aip, "aiprocessors": [aip]})
-            (station.root / "manifest.json").write_text(json.dumps({"version": "6.0.0"}))
+            (station.root / "manifest.json").write_text(json.dumps({"version": AIP_VERSION}))
             result = station.run("register")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(station.log(), [
@@ -280,7 +293,7 @@ class NotebookBehaviourTests(unittest.TestCase):
     def test_registration_stops_when_the_target_scan_fails(self):
         with tempfile.TemporaryDirectory() as directory:
             station = Station(directory, {"aiprocessors": []})
-            (station.root / "manifest.json").write_text(json.dumps({"version": "6.0.0"}))
+            (station.root / "manifest.json").write_text(json.dumps({"version": AIP_VERSION}))
             result = station.run("register")
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Targeted scan failed", result.stdout + result.stderr)
@@ -418,7 +431,7 @@ class NotebookBehaviourTests(unittest.TestCase):
             (callback,) = [n for n in flows if n.get("id") == "aipv1emi0001callback"]
             self.assertEqual(callback["pipelineId"], "P1")
             package = json.loads((project / "package.json").read_text())
-            self.assertEqual(package["dependencies"]["@edgematrix/node-red-contrib-eais"], "0.7.6")
+            self.assertEqual(package["dependencies"]["@edgematrix/node-red-contrib-eais"], "0.7.10")
             self.assertNotIn("@edge-ai/node-red-contrib-eais", package["dependencies"])
             self.assertFalse((project / "node_modules").exists())
             self.assertFalse((project / "flows_cred.json").exists())
@@ -548,6 +561,12 @@ class AccuracyNotebookTests(unittest.TestCase):
 
 
 class PresentationTests(unittest.TestCase):
+    def test_cached_manifest_version_matches_current_manifest(self):
+        notebook = json.loads((ROOT / "presentation.ipynb").read_text())
+        cell = next(cell for cell in notebook["cells"] if cell["id"] == "manifest")
+        output = "".join("".join(item.get("text", [])) for item in cell["outputs"])
+        self.assertIn(f"{'version':22} {AIP_VERSION}\n", output)
+
     def test_code_compiles_and_live_demo_is_opt_in(self):
         for name, (kind, source) in PRESENTATION.items():
             if kind == "code":

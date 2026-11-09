@@ -129,13 +129,25 @@ test("project pins the public EAIS node and excludes the legacy variant", () => 
     const lock = JSON.parse(read("logic/package-lock.json"));
     const name = "@edgematrix/node-red-contrib-eais";
     const legacy = "@edge-ai/node-red-contrib-eais";
-    assert.equal(manifest.dependencies[name], "0.7.6");
+    assert.equal(manifest.dependencies[name], "0.7.10");
     assert.equal(manifest.dependencies[legacy], undefined);
-    assert.equal(lock.packages[""].dependencies[name], "0.7.6");
+    assert.equal(lock.packages[""].dependencies[name], "0.7.10");
     assert.equal(lock.packages[`node_modules/${legacy}`], undefined);
-    assert.equal(lock.packages[`node_modules/${name}`].version, "0.7.6");
+    assert.equal(lock.packages[`node_modules/${name}`].version, "0.7.10");
     assert.equal(lock.packages[`node_modules/${name}`].resolved,
-        "https://registry.npmjs.org/@edgematrix/node-red-contrib-eais/-/node-red-contrib-eais-0.7.6.tgz");
+        "https://registry.npmjs.org/@edgematrix/node-red-contrib-eais/-/node-red-contrib-eais-0.7.10.tgz");
+    assert.equal(lock.packages[`node_modules/${name}`].peerDependenciesMeta["node-red"].optional, true);
+    assert.equal(manifest.dependencies["node-red"], undefined);
+    assert.equal(manifest.devDependencies?.["node-red"], undefined);
+    assert.equal(lock.packages["node_modules/node-red"], undefined);
+});
+
+test("the Node-RED runtime is pinned separately for integration tests", () => {
+    const manifest = JSON.parse(read("tests/node-red-runtime/package.json"));
+    const lock = JSON.parse(read("tests/node-red-runtime/package-lock.json"));
+    assert.equal(manifest.devDependencies["node-red"], "4.1.13");
+    assert.equal(lock.packages[""].devDependencies["node-red"], "4.1.13");
+    assert.equal(lock.packages["node_modules/node-red"].version, "4.1.13");
 });
 
 test("integration package includes runtime assets, excludes credentials, and describes latest counts", () => {

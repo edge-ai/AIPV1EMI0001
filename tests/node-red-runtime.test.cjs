@@ -1,12 +1,16 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const http = require("node:http");
+const { createRequire } = require("node:module");
 const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
 
 const root = path.resolve(__dirname, "..");
 const modules = path.resolve(process.env.NODE_RED_TEST_MODULES || path.join(root, "logic/node_modules"));
+const runtimeModules = path.resolve(process.env.NODE_RED_RUNTIME_MODULES
+    || (process.env.NODE_RED_TEST_MODULES ? modules : path.join(root, "tests/node-red-runtime/node_modules")));
+const aipVersion = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8")).version;
 
 async function waitFor(predicate, description) {
     const deadline = Date.now() + 10000;
@@ -16,19 +20,29 @@ async function waitFor(predicate, description) {
     }
 }
 
-test("EAIS 0.7.6 delivers callback metrics through Node-RED with mocked station services",
+test("EAIS 0.7.10 supports callback selection and metrics with mocked station services",
     { timeout: 45000 }, async (t) => {
         const packagePath = path.join(modules, "@edgematrix/node-red-contrib-eais");
-        assert.equal(require(path.join(packagePath, "package.json")).version, "0.7.6");
-        const RED = require(path.join(modules, "node-red"));
-        const express = require(path.join(modules, "express"));
+        assert.equal(require(path.join(packagePath, "package.json")).version, "0.7.10");
+        const nodeRedPackage = path.join(runtimeModules, "node-red/package.json");
+        const RED = require(path.dirname(nodeRedPackage));
+        const express = createRequire(nodeRedPackage)("express");
         const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "aip-node-red-"));
         let started = false;
+        let httpServer;
         t.after(async () => {
             try {
                 if (started) await RED.stop();
             } finally {
-                fs.rmSync(workspace, { recursive: true, force: true });
+                try {
+                    if (httpServer?.listening) {
+                        await new Promise((resolve, reject) => {
+                            httpServer.close((error) => error ? reject(error) : resolve());
+                        });
+                    }
+                } finally {
+                    fs.rmSync(workspace, { recursive: true, force: true });
+                }
             }
         });
 
@@ -39,7 +53,7 @@ test("EAIS 0.7.6 delivers callback metrics through Node-RED with mocked station 
         fs.writeFileSync(path.join(workspace, "flows.json"), JSON.stringify(flows));
 
         const app = express();
-        const httpServer = http.createServer(app);
+        httpServer = http.createServer(app);
         RED.init(httpServer, {
             userDir: workspace,
             flowFile: "flows.json",
@@ -77,7 +91,11 @@ test("EAIS 0.7.6 delivers callback metrics through Node-RED with mocked station 
         let failMetadata = false;
         server.isReady = true;
         server.transport = {};
-        server.request = async (_method, operation, params) => {
+        server.request = async (method, operation, params) => {
+            assert.equal(method, "GET");
+            if (operation === "PIPELINES_LIST") {
+                return [{ pk: "fixture-pipeline", name: "Fixture pipeline" }];
+            }
             assert.equal(operation, "PIPELINE_INFO");
             assert.equal(params.id, "fixture-pipeline");
             if (failMetadata) throw new Error("metadata unavailable");
@@ -85,10 +103,18 @@ test("EAIS 0.7.6 delivers callback metrics through Node-RED with mocked station 
                 name: "Fixture pipeline",
                 input_sources: [{ input_id: 0, media: { pk: "cam", name: "Gate", type: "camera" } }],
                 ai_processor_settings: { ai_processor: { unique_id: "AIPV1EMI0001",
-                    name: "Fixture AIP", version: "6.0.0",
+                    name: "Fixture AIP", version: aipVersion,
                     primary_processor: { classes: ["car", "person", "truck"] } } },
             };
         };
+        await new Promise((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+        const response = await fetch(`http://127.0.0.1:${httpServer.address().port}`
+            + "/edgematrix/callback/aipv1emi0001callback");
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), {
+            pipelines_list: [{ pk: "fixture-pipeline", name: "Fixture pipeline" }],
+            pipeline_selected: "fixture-pipeline",
+        });
         let stream;
         server.createEventStream = (config) => {
             stream = config;

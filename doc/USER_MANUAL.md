@@ -42,7 +42,7 @@ To activate the dashboard, follow these steps. Step 8 of
 test pipeline, but does not install Node-RED runtime nodes:
 
 1. Make sure the Node-RED runtime loads `@edgematrix/node-red-contrib-eais`
-   0.7.6 and UIBuilder. Do not install the legacy
+   0.7.10 and UIBuilder. Do not install the legacy
    `@edge-ai/node-red-contrib-eais` alongside it: both register the same node
    types. Have the station administrator arrange the migration and any restart;
    see [`logic/README.md`](../logic/README.md).

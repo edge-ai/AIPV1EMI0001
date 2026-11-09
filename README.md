@@ -304,9 +304,9 @@ UIBuilder application under [`dashboard/`](dashboard/). Together they provide:
 - per-source filtering;
 - ROI and line-crossing counters when those analytics are configured.
 
-The Node-RED runtime must load `@edgematrix/node-red-contrib-eais` **0.7.6**
-and UIBuilder. The project's locked local test install uses Node-RED 5 and
-requires Node.js 22.9 or later; this does not upgrade the station runtime.
+The Node-RED runtime must load `@edgematrix/node-red-contrib-eais` **0.7.10**
+and UIBuilder. The separate local integration-test harness uses Node-RED 4.1.13
+and Node.js 22; it does not upgrade the station runtime.
 Some stations instead have the legacy
 `@edge-ai/node-red-contrib-eais`; the two EAIS variants must **not** coexist
 because they register the same node types. Arrange any migration and restart

@@ -1,0 +1,14 @@
+{
+  "name": "aipv1emi0001-node-red-runtime-tests",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Isolated Node-RED runtime for integration tests.",
+  "devDependencies": {
+    "node-red": "4.1.13"
+  },
+  "overrides": {
+    "express": {
+      "qs": "6.16.0"
+    }
+  }
+}

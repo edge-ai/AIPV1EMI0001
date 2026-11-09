@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v6.1.0 - Unreleased
 
 - docs: Rewrite `localdev.ipynb` as a command-first build guide based on `eais-tools`, with Mermaid diagrams of the AIP, the runtime pipeline and the build steps
 - docs: Add `presentation.ipynb`, a talk companion on engineering Edge AI applications, with the reference benchmark chart
@@ -18,7 +18,7 @@
 - ci: Publish release archives and checksums to GitHub Releases
 - fix: Clearly distinguish latest callback counts from delayed HLS playback; defer inferred synchronization
 - fix: Exclude manual snapshots and unused browser command wiring from the dashboard
-- chore: Pin the public `@edgematrix/node-red-contrib-eais` 0.7.6 for Node-RED integration
+- chore: Pin the public `@edgematrix/node-red-contrib-eais` 0.7.10 and isolate the Node-RED test runtime from the distributable project
 - fix: Select the callback pipeline directly to avoid the 0.7.6 editor's environment-reference issue
 - docs: Describe the general-purpose EdgeAI Station integration without parking-dataset training claims
 - fix: Rename the ONNX download to `yolov7tiny-640.onnx` across Hugging Face, the notebook and build script
