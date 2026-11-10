@@ -28,10 +28,10 @@ Tracking is handled by the NVIDIA NvDCF multi-object tracker. The AIP supports t
 | `src/nvdsinfer_customparser/` | Custom bounding-box parser plugin (`libnvds_infercustomparser.so`) for `nvinfer` |
 | `bin/build.sh` | Builds the custom parser plugin and the TensorRT engine with `trtexec` |
 | `bin/install-nodered-project.sh` | Installs `logic/` and `dashboard/` as a ready Node-RED project for a given pipeline |
-| `localdev.ipynb` | Step-by-step build notebook: download weights → build → optional benchmark → validate → package → scan → pipeline test → dashboard |
+| `localdev.ipynb` | Step-by-step build notebook: download weights → build → optional benchmark → validate → package → scan → pipeline test |
 | `accuracy.ipynb` | Labelled detection evaluation: compare FP32/FP16 and the deployment engine on COCO-format data |
 | `presentation.ipynb` | Code-free talk companion: how this AI Processor is designed, optimized, measured and validated |
-| `tools/` | Notebook and CI helpers: package checks, inference latency benchmarks and labelled accuracy evaluation |
+| `tools/` | Standalone inference benchmarks and labelled accuracy evaluation; additional package safeguards for release CI |
 | `doc/` | User manual and integration notes |
 | `doc/benchmarks/` | Reference benchmark results (JSON) and chart |
 | `tests/` | Offline tests for the notebook, tools and dashboard |
@@ -110,8 +110,7 @@ flowchart TD
     S4 --> S5["5. Package<br/>eais-tools aip build / export"]
     S5 --> S6["6. Scan<br/>target AIP only"]
     S6 --> S7["7. Pipeline test<br/>eais-tools pipeline test"]
-    S7 --> S8["8. Node-RED + dashboard"]
-    S8 --> S9["9. Cleanup"]
+    S7 --> S8["8. Cleanup"]
 ```
 
 On a fresh station, run it in the Jupyter environment (App-Builder) from a clone at
@@ -132,24 +131,25 @@ Options:
   instead (built and tested on the Orin NX stack above). The download checks the
   TensorRT version; the later engine-load smoke test checks this device.
 - Step 0, `RUN_BENCHMARKS = True` enables section 3. It is off by default.
-- Step 8, `NR_PROJECT`: use a new name on a station that already has the default Node-RED
-  project. The cell refuses to overwrite an existing project unless `OVERWRITE=1`.
+- Step 0, `CLEANUP_EAIS_RESOURCES = True` opts in to cleanup in section 8. Leave it off
+  unless the station is reserved for the exercise.
 
-The pipeline test and dashboard are wired to a temporary `eais_*` pipeline. Step 9
-deletes it only if cleanup is explicitly enabled. To keep the dashboard, select a
-permanent pipeline in the callback node. Cleanup keeps `dist/` and the exported archive.
+The pipeline test creates temporary `eais_*` resources. Cleanup deletes them only if explicitly
+enabled, and keeps `dist/` and the exported archive. Node-RED/dashboard deployment is a
+[separate workflow](#integrated-node-red-dashboard), not a notebook step.
 
 The build and pipeline portions of an earlier notebook revision were exercised with both
 engine options on a Jetson Orin NX 16 GB
 (JetPack 6.0 / L4T R36.3, TensorRT 8.6.2, DeepStream 7.0, `eais-tools` 0.9.2), with the
-benchmark disabled. Activating and viewing the dashboard remains a manual step.
+benchmark disabled. The simplified notebook retains those native build and pipeline commands.
 
-**Packaging safeguards.** EAIS Tools 0.9.2 does not honor `.gitignore` or `!` exclusion
-rules, and copies whole directories. [`.include`](.include) therefore lists individual files,
-and the notebook passes it explicitly to `eais-tools aip build`.
-[`tools/check_package.py`](tools/check_package.py) then requires the exact intended file set
-in `dist/`, and checks that the exported archive matches `dist/` file by file (SHA-256).
-Unexpected files cause a failure, not silent removal.
+**Packaging.** EAIS Tools is the package builder: `eais-tools aip build` creates `dist/`,
+and `eais-tools aip export` creates the installable archive. [`.include`](.include) adds the
+flow, dashboard, installer and other files beyond EAIS Tools' default runtime files. This
+repository lists individual additions because EAIS Tools 0.9.2 copies directories recursively
+without honoring `.gitignore` or `!` exclusions. No additional packaging script is needed in
+the notebook. The extra [`tools/check_package.py`](tools/check_package.py) integrity and
+unexpected-file checks are confined to [release CI](#release-ci).
 
 **Configuration validation.** Step 4 runs `eais-tools aip check`, then calls the EAIS Triton
 and DeepStream validators directly on the deployment configs, plus tracker YAML and library
@@ -172,6 +172,21 @@ and cleanup, the notebook checks that no other run owns existing `eais_*` resour
 Section 3 of the notebook runs [`tools/benchmark.py`](tools/benchmark.py). It compares direct
 ONNX Runtime CUDA FP32 inference with TensorRT FP32 (`--noTF32`) and FP16 engines **using one
 timing boundary for every backend**.
+
+The tool also handles graph preparation and engine builds. It can be run independently:
+
+```bash
+python3 tools/benchmark.py all \
+  --onnx models/AIPV1EMI0001_Yolo_Detector/yolov7tiny-640.onnx \
+  --output tmp/inference-benchmark/my-run
+```
+
+Use a new or empty output directory for each run. It contains the benchmark-only graph,
+FP32/FP16 engines, build logs, `results.json` and `results.md`; deployment files stay unchanged.
+`--workspace-mib` defaults to 1024, `--trtexec` selects the TensorRT builder, and optional
+`--deployment-engine` records the deployment engine's hash. The existing `raw-onnx` and `run`
+commands remain available for separately prepared artifacts. No services are stopped or
+restarted; coordinate a quieter station with its administrator before performance measurements.
 
 [NVIDIA's timing definitions](https://docs.nvidia.com/deeplearning/tensorrt/archives/tensorrt-861/developer-guide/index.html#trtexec)
 show why `trtexec` cannot simply be placed next to a Python ONNX Runtime loop: its GPU
@@ -305,7 +320,7 @@ The tag-triggered release workflow compiles the ARM64 parser in a pinned public 
 7.0 SDK image, adds the checksum-verified prebuilt engine, and exports an archive with a
 `dist/` root, matching `eais-tools aip export`. This image lacks EAIS Tools, so CI assembles
 `dist/` from the explicit `.include` files and checks the result and the archive with the
-same `tools/check_package.py`. The notebook remains the workflow that runs EAIS
+CI-only `tools/check_package.py`. The notebook instead uses native EAIS
 validation, build and export. A manual workflow run validates packaging and saves an Actions
 artifact without publishing a release.
 
@@ -337,8 +352,9 @@ Some stations instead have the legacy
 because they register the same node types. Arrange any migration and restart
 with the station administrator; see [`logic/README.md`](logic/README.md).
 
-Install the project with [`bin/install-nodered-project.sh`](bin/install-nodered-project.sh),
-which step 8 of [`localdev.ipynb`](localdev.ipynb) also runs:
+Deployment is separate from the build notebook. From the AIP directory in a station
+App-Builder terminal (which shares `/data/projects` with Node-RED), run the standalone
+[`bin/install-nodered-project.sh`](bin/install-nodered-project.sh):
 
 ```bash
 bash bin/install-nodered-project.sh --pipeline <pipeline-id>
@@ -348,7 +364,7 @@ It writes `nodered-aipv1emi0001-dashboard` under `NODE_RED_PROJECTS_DIR`
 (default `/data/projects`) with the callback preselected for that pipeline,
 installs the dashboard's browser libraries from the lock file and commits the
 project to a local git repository. It refuses to replace an existing project
-unless `--force` is given, and leaves nothing behind if a step fails. It does
+unless `--force` is given, and preserves an existing project if preparation fails. It does
 not install Node-RED runtime nodes or switch the active project. Open the
 project, check the pipeline in the **AIPV1EMI0001 callback** node, and deploy. Open the dashboard at
 `https://<station>/ms5/aipv1emi0001_dash/` and assign `aipv1emi0001_dash` to

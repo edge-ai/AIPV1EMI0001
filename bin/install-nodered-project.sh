@@ -46,7 +46,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-[ -n "$PIPELINE_ID" ] || die "--pipeline is required: run the pipeline test first, or copy the ID from the station UI"
+[ -n "$PIPELINE_ID" ] || die "--pipeline is required: copy the existing pipeline's ID from the station UI"
 [[ $PROJECT =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid project name: $PROJECT"
 for tool in jq npm git tar; do
     command -v "$tool" > /dev/null || die "missing command: $tool"

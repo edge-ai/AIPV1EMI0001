@@ -34,8 +34,23 @@ npm install --save-exact --registry=https://registry.npmjs.org/ \
 ```
 
 Copying this project's `package.json` records its dependencies; it does not
-by itself install or activate them in the Node-RED runtime. The notebook's
+by itself install or activate them in the Node-RED runtime. The standalone
 `bin/install-nodered-project.sh` installs browser libraries in `uibuilder/` only.
+
+## Install the project
+
+Deployment is independent of `localdev.ipynb`. From the AIP root in a station
+App-Builder terminal, run:
+
+```bash
+bash bin/install-nodered-project.sh --pipeline <pipeline-id>
+```
+
+Choose the ID of an existing pipeline running this AIP. The installer requires
+`jq`, `npm`, `git`, `tar`, npm registry access and write access to `/data/projects`
+(override with `NODE_RED_PROJECTS_DIR`). `--project <name>` chooses another project
+name; `--force` replaces an existing copy after preparation succeeds. It does not
+open the project or restart Node-RED.
 
 ## Configure
 
@@ -44,8 +59,8 @@ by itself install or activate them in the Node-RED runtime. The notebook's
 3. Deploy. Repeat these steps when switching pipelines.
 
 The checked-in flow deliberately leaves the pipeline selection empty;
-`bin/install-nodered-project.sh --pipeline <id>` preselects it in the installed copy. Select a pipeline
-in the callback node rather than putting an environment-variable reference in
+`bin/install-nodered-project.sh --pipeline <id>` preselects it in the installed
+copy. Select a pipeline in the callback node rather than putting an environment-variable reference in
 that field. When Node-RED admin authentication is enabled, the pipeline selector
 requires `flows.read` permission, and refreshing the callback metadata cache
 requires `flows.write`.

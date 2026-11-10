@@ -38,15 +38,15 @@ UIBuilder application in `dashboard/`. The dashboard shows:
 - a combined or per-source view;
 - ROI and line-crossing counts when those analytics are configured.
 
-To activate the dashboard, follow these steps. Step 8 of
-[`localdev.ipynb`](../localdev.ipynb) runs step 2 for its test pipeline:
+Dashboard deployment is separate from the build notebook. To activate it:
 
 1. Make sure the Node-RED runtime loads `@edgematrix/node-red-contrib-eais`
    0.7.10 and UIBuilder. Do not install the legacy
    `@edge-ai/node-red-contrib-eais` alongside it: both register the same node
    types. Have the station administrator arrange the migration and any restart;
    see [`logic/README.md`](../logic/README.md).
-2. From the extracted AIP package, inside the Node-RED container, run
+2. From the AIP directory in a station App-Builder terminal (or the extracted
+   package in an environment sharing Node-RED's project directory), run
    `bash bin/install-nodered-project.sh --pipeline <pipeline-id>`. It creates
    the project `nodered-aipv1emi0001-dashboard` under `/data/projects/`
    (override with `NODE_RED_PROJECTS_DIR`), installs the dashboard's browser

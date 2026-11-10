@@ -7,7 +7,8 @@
 The expected set is what EAIS Tools 0.9.2 copies by itself (EAIS_FILES) plus every
 file listed in .include. A missing, unexpected or modified file is an error, so
 source models, credentials, node_modules or caches can never ship unnoticed.
-Used by localdev.ipynb on the station and by the release workflow in CI.
+This is a release CI safeguard, not a prerequisite for the native EAIS Tools
+build/export workflow in localdev.ipynb.
 """
 import argparse
 import hashlib
