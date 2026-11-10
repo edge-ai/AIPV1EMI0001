@@ -5,16 +5,26 @@ import Hls from "../uibuilder/vendor/hls.js/dist/hls.mjs";
 const MAX_MESSAGES = 100;
 const SIGNALING_BASE = "/signaling";
 const VIDEO_CONFIG_REFRESH_MS = 10000;
+const VIDEO_SELECTION_REFRESH_MS = 2000;
+const VIDEO_SELECTION_TIMEOUT_MS = 10000;
 
 createApp({
     data() {
         return {
             connected: false,
             sources: [],
-            totals: { objects: null, classes: {}, roi: {}, lineCrossing: {} },
+            totals: { objects: null, classes: {}, roi: {}, lineCrossing: {}, lineCrossingCumulative: {} },
             pipeline: { id: "", name: "" },
             aggregation: "",
-            selectedSource: "all",
+            delivery: "",
+            selectedSource: "",
+            videoSources: [],
+            pendingSource: null,
+            selectionError: "",
+            selectionChangeError: "",
+            selectionRequest: null,
+            selectionTimeout: null,
+            selectionRefreshTimer: null,
             lastUpdate: null,
             messages: [],
             videoState: "waiting",
@@ -45,23 +55,30 @@ createApp({
         },
 
         selectedSourceName() {
-            return this.selected ? this.selected.name : "Unknown source";
+            if (!this.selectedSource) return this.pendingSource !== null ? "Switching source" : "Selection unavailable";
+            return this.videoSources.find((source) => source.id === this.selectedSource)?.name
+                || this.selected?.name || `Source ${this.selectedSource}`;
         },
 
         scopedTotal() {
-            return this.selected ? this.selected.total : this.totals.objects;
+            return this.selectedSource === "all" ? this.totals.objects : this.selected?.total ?? null;
         },
 
         scopedClasses() {
-            return this.selected ? this.selected.counts : this.totals.classes;
+            return this.selectedSource === "all" ? this.totals.classes : this.selected?.counts;
         },
 
         scopedRoi() {
-            return this.selected ? this.selected.roi : this.totals.roi;
+            return this.selectedSource === "all" ? this.totals.roi : this.selected?.roi;
         },
 
         scopedLines() {
-            return this.selected ? this.selected.lineCrossing : this.totals.lineCrossing;
+            return this.selectedSource === "all" ? this.totals.lineCrossing : this.selected?.lineCrossing;
+        },
+
+        scopedLineTotals() {
+            return this.selectedSource === "all"
+                ? this.totals.lineCrossingCumulative : this.selected?.lineCrossingCumulative;
         },
 
         classCards() {
@@ -75,13 +92,21 @@ createApp({
         },
 
         lineRows() {
-            return this.toRows(this.scopedLines);
+            const instant = this.scopedLines || {};
+            const cumulative = this.scopedLineTotals || {};
+            return this.toRows(Object.fromEntries([...new Set([...Object.keys(cumulative), ...Object.keys(instant)])]
+                .map((label) => [label, cumulative[label]])))
+                .map((row) => ({ ...row, instant: this.formatCount(instant[row.label]) }));
         },
     },
 
     watch: {
         "pipeline.id"() {
-            nextTick(() => this.connectVideo(true));
+            this.resetVideoSelection();
+            nextTick(() => {
+                this.connectVideo(true);
+                this.syncVideoSelection();
+            });
         },
     },
 
@@ -105,15 +130,13 @@ createApp({
             if (!data || data.type !== "aipv1emi0001.metrics" || !Array.isArray(data.sources)) return;
 
             this.sources = data.sources;
-            this.totals = data.totals || { objects: null, classes: {}, roi: {}, lineCrossing: {} };
+            this.totals = data.totals || { objects: null, classes: {}, roi: {}, lineCrossing: {}, lineCrossingCumulative: {} };
             this.pipeline = data.pipeline || { id: "", name: "" };
             this.aggregation = data.aggregation || "";
+            this.delivery = data.delivery || "";
             this.lastUpdate = new Date(data.timestamp || Date.now());
             this.messages.unshift(msg);
             if (this.messages.length > MAX_MESSAGES) this.messages.length = MAX_MESSAGES;
-            if (this.selectedSource !== "all" && !this.sources.some((source) => source.id === this.selectedSource)) {
-                this.selectedSource = "all";
-            }
         },
 
         async responseError(response) {
@@ -124,6 +147,87 @@ createApp({
                 return body.detail || body.message || text;
             } catch {
                 return text.length > 240 ? `${text.slice(0, 237)}...` : text;
+            }
+        },
+
+        resetVideoSelection() {
+            if (this.selectionRequest) this.selectionRequest.abort();
+            clearTimeout(this.selectionTimeout);
+            this.selectionRequest = null;
+            this.selectionTimeout = null;
+            this.selectedSource = "";
+            this.videoSources = [];
+            this.pendingSource = null;
+            this.selectionError = "";
+            this.selectionChangeError = "";
+        },
+
+        async syncVideoSelection(source = null) {
+            const changing = source !== null;
+            if (!this.pipeline.id || this.pendingSource !== null || (this.selectionRequest && !changing)) return;
+            if (changing && source !== "all" && !this.videoSources.some((input) => input.id === source)) {
+                this.selectionChangeError = "That video source is not in this pipeline. Wait for the source list to refresh.";
+                return;
+            }
+            if (this.selectionRequest) this.selectionRequest.abort();
+            clearTimeout(this.selectionTimeout);
+            const pipelineId = this.pipeline.id;
+            const controller = markRaw(new AbortController());
+            const timeout = setTimeout(() => controller.abort(), VIDEO_SELECTION_TIMEOUT_MS);
+            this.selectionRequest = controller;
+            this.selectionTimeout = timeout;
+            if (changing) {
+                this.pendingSource = source;
+                this.selectedSource = "";
+                this.selectionChangeError = "";
+            }
+            const base = `/ms3/pipeline/${encodeURIComponent(pipelineId)}`;
+            try {
+                if (changing) {
+                    const index = source === "all" ? "-1" : source;
+                    const response = await fetch(`${base}/set_tiler/${encodeURIComponent(index)}`, {
+                        method: "POST",
+                        credentials: "same-origin",
+                        signal: controller.signal,
+                    });
+                    if (!response.ok) throw new Error(await this.responseError(response));
+                    const result = await response.json();
+                    if (!result || result.status !== 200) {
+                        throw new Error(result?.output || "The pipeline rejected the selection.");
+                    }
+                }
+                if (controller !== this.selectionRequest || pipelineId !== this.pipeline.id) return;
+                const response = await fetch(`${base}/tiler`, {
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    signal: controller.signal,
+                });
+                if (!response.ok) throw new Error(await this.responseError(response));
+                const result = await response.json();
+                if (controller !== this.selectionRequest || pipelineId !== this.pipeline.id) return;
+                if (!result || result.status !== 200 || !Number.isInteger(result.output) || result.output < -1) {
+                    throw new Error("The pipeline returned an invalid video selection.");
+                }
+                const selected = result.output === -1 ? "all" : String(result.output);
+                if (selected !== "all" && this.videoSources.length
+                    && !this.videoSources.some((input) => input.id === selected)) {
+                    throw new Error(`Source ${selected} is not in the pipeline input list.`);
+                }
+                this.selectedSource = selected;
+                this.selectionError = "";
+            } catch (error) {
+                if (controller !== this.selectionRequest || pipelineId !== this.pipeline.id) return;
+                this.selectedSource = "";
+                const detail = controller.signal.aborted ? "The request timed out." : error.message;
+                this.selectionError = `Video selection unavailable: ${detail} Retrying automatically.`;
+                if (changing) this.selectionChangeError = `Could not confirm the video source change: ${detail}`;
+            } finally {
+                clearTimeout(timeout);
+                if (controller === this.selectionRequest) {
+                    this.selectionRequest = null;
+                    this.selectionTimeout = null;
+                    this.pendingSource = null;
+                }
             }
         },
 
@@ -176,6 +280,12 @@ createApp({
                     || !(config.hls_output_sink_settings || config.mtx_output_sink_settings)) {
                     throw new Error("The pipeline service returned an invalid video configuration.");
                 }
+                this.videoSources = Array.isArray(config.input_sources)
+                    && config.input_sources.every((source) => source && Number.isInteger(source.input_id) && source.input_id >= 0)
+                    ? config.input_sources.map((source) => ({
+                        id: String(source.input_id),
+                        name: source.media?.name || `Source ${source.input_id}`,
+                    })) : [];
                 // Match the station web UI: HLS takes precedence when both outputs are enabled.
                 const mode = config.hls_output_sink_settings?.active ? "hls"
                     : config.mtx_output_sink_settings?.active && config.mtx_output_sink_settings?.webrtc_enabled
@@ -369,10 +479,13 @@ createApp({
         uibuilder.onChange("ioConnected", (connected) => { this.connected = Boolean(connected); });
         uibuilder.onChange("msg", (msg) => this.applyMessage(msg));
         this.videoRefreshTimer = setInterval(() => this.connectVideo(), VIDEO_CONFIG_REFRESH_MS);
+        this.selectionRefreshTimer = setInterval(() => this.syncVideoSelection(), VIDEO_SELECTION_REFRESH_MS);
     },
 
     beforeUnmount() {
         clearInterval(this.videoRefreshTimer);
+        clearInterval(this.selectionRefreshTimer);
+        this.resetVideoSelection();
         this.destroyVideo();
     },
 }).mount("#app");

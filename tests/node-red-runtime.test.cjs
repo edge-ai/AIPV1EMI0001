@@ -158,4 +158,13 @@ test("EAIS 0.7.10 supports callback selection and metrics with mocked station se
         assert.equal(dashboard[3].payload.pipeline.id, "fixture-pipeline");
         assert.equal(dashboard[3].payload.sources[0].name, "Source 0");
         assert.equal(dashboard[3].payload.totals.objects, 1);
+
+        const placeholder = (id) => ({ source_id: id, frame_num: null, obj_counter: [null, null, null] });
+        stream.onMessage([placeholder(0), { source_id: 1, frame_num: 7, obj_counter: [5, 0, 0] }]);
+        await waitFor(() => dashboard.length === 5, "stream frame from source 1");
+        assert.equal(dashboard[4].payload.delivery, "stream");
+        assert.equal(dashboard[4].payload.totals.objects, 6, "source 0 keeps its latest real frame");
+        stream.onMessage([{ source_id: 0, frame_num: 8, obj_counter: [2, 0, 0] }, placeholder(1)]);
+        await waitFor(() => dashboard.length === 6, "stream frame from source 0");
+        assert.equal(dashboard[5].payload.totals.objects, 7);
     });

@@ -38,15 +38,25 @@
 
         <main>
             <section class="toolbar">
-                <label>
-                    Metrics scope
-                    <select v-model="selectedSource">
-                        <option value="all">All sources</option>
-                        <option v-for="source in sources" :key="source.id" :value="source.id">
-                            {{ source.name }}
-                        </option>
-                    </select>
-                </label>
+                <div class="source-control">
+                    <div class="source-picker">
+                        <label for="video-source">Video source</label>
+                        <select id="video-source" :value="pendingSource ?? selectedSource"
+                            :disabled="!selectedSource || !videoSources.length || pendingSource !== null"
+                            aria-describedby="source-help" @change="syncVideoSelection($event.target.value)">
+                            <option value="" disabled>{{ !pipeline.id ? "Waiting for pipeline" : selectionRequest ? "Reading selection…" : "Selection unavailable" }}</option>
+                            <option value="all">All sources</option>
+                            <option v-for="source in videoSources" :key="source.id" :value="source.id">
+                                {{ source.name }}
+                            </option>
+                        </select>
+                    </div>
+                    <p id="source-help" class="hint">Shared with all viewers. Counts follow this selection.</p>
+                    <p v-if="pendingSource !== null" class="hint" role="status">Switching video source…</p>
+                    <p v-else-if="selectionError && !selectionChangeError" class="source-error" role="status">{{ selectionError }}</p>
+                    <p v-else-if="pipeline.id && !videoSources.length" class="source-error" role="status">Video source list unavailable. Retrying automatically.</p>
+                    <p v-if="selectionChangeError" class="source-error" role="alert">{{ selectionChangeError }}</p>
+                </div>
                 <span class="hint">{{ aggregation }}</span>
             </section>
 
@@ -73,13 +83,13 @@
                 <article class="counter-panel">
                     <div class="counter-heading">
                         <h2>Latest counts</h2>
-                        <span>{{ selectedSource === "all" ? sources.length + " sources" : selectedSourceName }}</span>
+                        <span>{{ selectedSource === "all" ? "All sources" : selectedSourceName }}</span>
                     </div>
                     <div class="total-row">
                         <span>All objects</span>
                         <strong>{{ formatCount(scopedTotal) }}</strong>
                     </div>
-                    <p v-if="sources.length && scopedTotal == null" class="hint" role="status">Some metrics are unavailable for this window.</p>
+                    <p v-if="selectedSource && sources.length && scopedTotal == null" class="hint" role="status">{{ delivery === "stream" ? "Waiting for a recent frame from every selected source." : "Some metrics are unavailable for this window." }}</p>
                     <div class="class-list" aria-label="Object counts by class">
                         <div v-for="item in classCards" :key="item.label" class="class-row">
                             <span class="class-name">
@@ -108,10 +118,15 @@
                 <article class="detail-card">
                     <div class="card-heading">
                         <h2>Line crossings</h2>
+                        <span class="card-note">Total since pipeline start</span>
                     </div>
                     <div v-if="lineRows.length" class="rows">
                         <div v-for="row in lineRows" :key="row.label" class="count-row">
-                            <span>{{ row.label }}</span><strong>{{ row.value }}</strong>
+                            <span>{{ row.label }}</span>
+                            <span class="line-values">
+                                <strong>{{ row.value }}</strong>
+                                <small>instant {{ row.instant }}</small>
+                            </span>
                         </div>
                     </div>
                     <div v-else class="empty compact">No line-crossing data in the latest window.</div>

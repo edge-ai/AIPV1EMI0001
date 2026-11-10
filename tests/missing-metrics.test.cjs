@@ -6,13 +6,13 @@ const { test } = require("node:test");
 
 const root = path.resolve(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
-const normalizer = new Function("msg", "node", "env", JSON.parse(read("logic/flows.json"))
+const normalizer = new Function("msg", "node", "env", "context", JSON.parse(read("logic/flows.json"))
     .find((node) => node.id === "aipv1emi0001normalize").func);
 
 function normalize(payload) {
     const warnings = [];
     const result = normalizer({ payload, eais: { pipelineId: "test-pipeline" } },
-        { warn: (warning) => warnings.push(warning) }, { get: () => undefined });
+        { warn: (warning) => warnings.push(warning) }, { get: () => undefined }, undefined);
     assert.deepEqual(warnings, []);
     return result.payload;
 }
@@ -64,6 +64,8 @@ test("missing sources remain unavailable in per-source and all-source metrics", 
 
     const app = dashboard();
     app.applyMessage({ payload: data });
+    assert.equal(app.formatCount(app.scopedTotal), "N/A", "unconfirmed selection shows no counts");
+    app.selectedSource = "all";
     assert.equal(app.formatCount(app.scopedTotal), "N/A");
     assert.deepEqual(Array.from(app.classCards, (entry) => entry.value), ["N/A", "N/A", "N/A"]);
     assert.deepEqual(Array.from(app.roiRows, (entry) => entry.value), ["N/A"]);
@@ -89,6 +91,7 @@ test("unknown values do not become zero, while observed zero remains zero", () =
     assert.equal(app.formatCount(null), "N/A");
     assert.equal(app.formatCount(0), 0);
     app.applyMessage({ payload: data });
+    app.selectedSource = "all";
     assert.deepEqual(Array.from(app.classCards, (entry) => entry.value), [0, "N/A", 2]);
 });
 
@@ -101,6 +104,7 @@ test("missing analytics labels do not invent values", () => {
     assert.deepEqual(data.totals.lineCrossing, {});
     const app = dashboard();
     app.applyMessage({ payload: data });
+    app.selectedSource = "all";
     assert.equal(app.formatCount(app.scopedTotal), 0);
     assert.equal(app.roiRows.length, 0);
     assert.equal(app.lineRows.length, 0);

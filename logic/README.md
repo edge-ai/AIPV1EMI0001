@@ -84,11 +84,19 @@ may be required.
 The dashboard reads the pipeline's output settings from MS3 and automatically
 uses HLS or WebRTC, with the same HLS precedence as the station web UI.
 Enable the required output in the pipeline; there is no dashboard transport selector.
-Counts are the latest received metadata. For batched delivery the normalizer
-uses the last window in the batch; counts are window maxima where applicable,
-not necessarily per-frame values. The timestamp is the normalization time, not
-the video frame's capture time. No frame-level alignment is applied, and the
-dashboard sends no commands back to the station.
+The normalizer automatically distinguishes per-frame source records from merged
+statistics. Stream callbacks can list all inputs while providing a frame for only
+some of them; null placeholders do not erase another input's latest valid frame.
+Updates are immediate, with no deliberate display delay. On each callback,
+retained stream samples older than two seconds are marked unavailable. This
+expiry check is message-driven, not a timer that detects a completely silent feed.
+Merged statistics use maxima from the last delivered merge window, without
+carrying counts over from earlier windows. A delivery-mode or pipeline change
+clears the retained stream state.
+
+The timestamp is the normalization time, not the video frame's capture time.
+No frame-level alignment is applied. The dashboard directly controls the shared
+video tiler through MS3; no browser commands are wired back into this Node-RED flow.
 
 ## Regression checks
 
@@ -115,7 +123,8 @@ The normalizer sends:
 {
   "type": "aipv1emi0001.metrics",
   "timestamp": "2026-09-25T00:00:00.000Z",
-  "aggregation": "latest frame or merge-window maximum",
+  "delivery": "stream",
+  "aggregation": "Latest frame per source",
   "pipeline": {"id": "...", "name": "..."},
   "sources": [
     {
@@ -125,23 +134,35 @@ The normalizer sends:
       "counts": {"car": 4, "person": 2, "truck": 1},
       "total": 7,
       "roi": {"parking": 3},
-      "lineCrossing": {"entrance": 5}
+      "lineCrossing": {"entrance": 0},
+      "lineCrossingCumulative": {"entrance": 42}
     }
   ],
   "totals": {
     "objects": 7,
     "classes": {"car": 4, "person": 2, "truck": 1},
     "roi": {"parking": 3},
-    "lineCrossing": {"entrance": 5}
+    "lineCrossing": {"entrance": 0},
+    "lineCrossingCumulative": {"entrance": 42}
   }
 }
 ```
 
+`delivery` is `stream` for per-frame records and `batch` for merged records;
+`aggregation` is respectively `Latest frame per source` or `Merge-window maximum`.
+Push envelopes are unwrapped to their last record before interpreting its data.
 For merged callback data, the displayed count is `max_val` from the latest
-merge window. For passthrough data, it is the latest frame count. A source
+merge window. For stream data, it is the latest valid frame count per input. A source
 with no observed frames has `available: false` and `null` class counts and
 total; the all-source totals are also `null` when any source is unavailable.
-The dashboard displays these values as `N/A`. Analytics labels are reported
+The dashboard displays these values as `N/A`. `lineCrossing` is the instant
+count (`objLCCurrCnt`: crossings in the latest frame, or the window `max_val`);
+`lineCrossingCumulative` is DeepStream's running total per line (`objLCCumCnt`,
+the counter drawn on the video), using the window's `last_val` in batch delivery.
+It requires AIP 6.1.0 or later; with older callbacks it is empty and shown as
+`N/A`. Analytics labels are reported
 only when their values were observed; absence does not prove that an analytic
 is unconfigured. Totals combine reported per-source values and need not
-represent a simultaneous frame. The timestamp is not a freshness alarm.
+represent a simultaneous frame. Stream state belongs to the normalizer's node
+context; it is not a frame-synchronization buffer. The timestamp is not a
+freshness alarm.

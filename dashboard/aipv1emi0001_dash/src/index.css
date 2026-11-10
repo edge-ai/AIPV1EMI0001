@@ -95,13 +95,19 @@ h2 { font-size: 1.05rem; }
 }
 
 .toolbar label { display: flex; align-items: center; gap: 0.6rem; color: var(--muted); }
+.source-control { min-width: 0; max-width: 100%; }
+.source-picker { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.source-control p { font-size: 0.875rem; overflow-wrap: anywhere; }
+.source-error { color: var(--red); margin-top: 0.35rem; }
 select {
     color: var(--text);
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 0.55rem;
     padding: 0.5rem 2rem 0.5rem 0.7rem;
+    max-width: 100%;
 }
+select:disabled { cursor: not-allowed; opacity: 0.65; }
 select:focus-visible {
     outline: 2px solid var(--cyan);
     outline-offset: 3px;
@@ -208,6 +214,9 @@ select:focus-visible {
 }
 .count-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .count-row strong { color: var(--cyan); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.card-note { color: var(--muted); font-size: 0.8rem; }
+.count-row .line-values { display: flex; flex: none; align-items: baseline; gap: 0.6rem; }
+.line-values small { color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
 
 .empty {
     color: var(--muted);

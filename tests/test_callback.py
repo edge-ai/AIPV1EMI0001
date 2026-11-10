@@ -105,7 +105,24 @@ class CallbackTests(unittest.TestCase):
             "exit": {"max_val": 1, "min_val": 1, "sum_val": 1},
         })
         self.assertEqual(self.merge(self.batch(1, self.frame(number=3)))[0]["analytics_obj_cnt"],
-                         {"objInROIcnt": {}, "objLCCurrCnt": {}})
+                         {"objInROIcnt": {}, "objLCCurrCnt": {}, "objLCCumCnt": {}})
+
+    def test_cumulative_line_crossings_report_latest_running_total(self):
+        frame = self.batch(1, self.frame(number=1, analytics={
+            "objLCCurrCnt": {"entry": 1},
+            "objLCCumCnt": {"entry": 41},
+        }))
+        self.assertEqual(frame[0]["objLCCumCnt"], {"entry": 41})
+        later = self.batch(1, self.frame(number=2, analytics={
+            "objLCCurrCnt": {"entry": 2},
+            "objLCCumCnt": {"entry": 43},
+        }))
+        result = self.merge(frame, later)[0]["analytics_obj_cnt"]
+        self.assertEqual(result["objLCCumCnt"], {
+            "entry": {"max_val": 43, "min_val": 41, "last_val": 43},
+        })
+        self.assertEqual(result["objLCCurrCnt"]["entry"]["sum_val"], 3)
+        self.assertIsNone(self.batch(2, self.frame())[1]["objLCCumCnt"])
 
     def test_missing_source_has_unknown_counts_not_zero(self):
         batch = self.batch(2, self.frame(classes=(0, 0, 1)))

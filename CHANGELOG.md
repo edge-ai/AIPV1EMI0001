@@ -4,6 +4,9 @@
 
 - docs: Rewrite `localdev.ipynb` as a command-first build guide based on `eais-tools`, with a build sequence diagram; keep architecture explanations in the presentation
 - fix: Distinguish missing callback frames from zero detections and aggregate only reported analytics values
+- feat: Forward DeepStream's cumulative line-crossing count (`objLCCumCnt`) and show it on the dashboard next to the instant count
+- feat: Detect stream and merged callback delivery automatically; in stream mode keep each input's latest frame and mark samples older than 2 s unavailable
+- feat: Add a dashboard video source selector that controls the pipeline's shared tiler and follows changes made in the station web UI
 - ci: Check pull requests and pin the Hugging Face model revision used by notebooks and releases
 - docs: Add `presentation.ipynb`, a code-free talk companion on engineering Edge AI applications, with the reference benchmark table and chart
 - feat: Add standalone `bin/install-nodered-project.sh` to install the Node-RED flow and dashboard for a pipeline, outside the build notebook

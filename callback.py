@@ -62,6 +62,7 @@ class UserCustomCallback(CustomCallback):
                 'obj_counter': [None] * len(classes),
                 'objInROIcnt': None,
                 'objLCCurrCnt': None,
+                'objLCCumCnt': None,
             }
             for source_id in source_ids
         }
@@ -89,7 +90,7 @@ class UserCustomCallback(CustomCallback):
                 else:
                     mlogger.warning(f"Ignoring invalid class_id {class_id!r} for source {source_id}")
 
-            analytics = {'objInROIcnt': {}, 'objLCCurrCnt': {}}
+            analytics = {'objInROIcnt': {}, 'objLCCurrCnt': {}, 'objLCCumCnt': {}}
             user_meta_list = frame_meta.get('frame_user_meta_list', [])
             if not isinstance(user_meta_list, list):
                 mlogger.warning(f"Invalid analytics metadata for source {source_id}")
@@ -148,7 +149,7 @@ class UserCustomCallback(CustomCallback):
                 }
 
             analytics = {}
-            for key in ('objInROIcnt', 'objLCCurrCnt'):
+            for key in ('objInROIcnt', 'objLCCurrCnt', 'objLCCumCnt'):
                 values_by_label = {}
                 for frame in observed:
                     for label, value in frame[key].items():
@@ -156,10 +157,15 @@ class UserCustomCallback(CustomCallback):
                             values_by_label.setdefault(label, []).append(int(value))
                         else:
                             mlogger.warning(f"Ignoring invalid {key} value for source {source_id}, label {label!r}")
-                analytics[key] = {
-                    label: {'max_val': max(values), 'min_val': min(values), 'sum_val': sum(values)}
-                    for label, values in values_by_label.items()
-                }
+                analytics[key] = {}
+                for label, values in values_by_label.items():
+                    stats = {'max_val': max(values), 'min_val': min(values)}
+                    if key == 'objLCCumCnt':
+                        # Running totals: report the latest value; a sum would be meaningless.
+                        stats['last_val'] = values[-1]
+                    else:
+                        stats['sum_val'] = sum(values)
+                    analytics[key][label] = stats
 
             first = observed[0] if observed else {}
             last = observed[-1] if observed else {}

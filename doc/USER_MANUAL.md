@@ -86,7 +86,8 @@ entry per input source:
     "ntp_timestamp": 1760000000000,
     "obj_counter": [2, 1, 0],
     "objInROIcnt": {"roi_label": 2},
-    "objLCCurrCnt": {"line_label": 1}
+    "objLCCurrCnt": {"line_label": 1},
+    "objLCCumCnt": {"line_label": 42}
   }
 ]
 ```
@@ -95,6 +96,8 @@ entry per input source:
   `["car", "person", "truck"]` (the `labels-rev3.txt` order).
 - `objInROIcnt` / `objLCCurrCnt` — per-label counts from the ROI / LCC analytics
   plugins (`{}` when no analytics values were reported for the frame).
+- `objLCCumCnt` — per-line running total of crossings since the pipeline
+  started, the counter drawn on the video.
 
 ### Merge mode (merge enabled, default 1 s window)
 
@@ -116,7 +119,8 @@ entry per input source:
     },
     "analytics_obj_cnt": {
       "objInROIcnt":  {"roi_label":  {"max_val": 2, "min_val": 0, "sum_val": 40}},
-      "objLCCurrCnt": {"line_label": {"max_val": 1, "min_val": 0, "sum_val": 3}}
+      "objLCCurrCnt": {"line_label": {"max_val": 1, "min_val": 0, "sum_val": 3}},
+      "objLCCumCnt":  {"line_label": {"max_val": 45, "min_val": 42, "last_val": 45}}
     }
   }
 }
@@ -134,7 +138,8 @@ falls back to the batch's reported source slots.
 
 Class `count_val` is the sum of per-frame counts, not a unique-object count;
 the mean and median are rounded to the nearest integer. ROI and line-crossing
-statistics include only values reported for that label. A label absent from the
+statistics include only values reported for that label. `objLCCumCnt` reports
+`last_val`, the latest running total in the window, instead of a sum. A label absent from the
 window is omitted, which does not establish whether an analytic is configured.
 The dashboard's all-source totals sum per-source maxima, not necessarily
 simultaneous observations; if a source is unavailable those totals are `N/A`.
