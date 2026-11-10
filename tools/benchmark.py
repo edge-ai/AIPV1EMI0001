@@ -8,12 +8,18 @@ GPU-resident input and the same timing boundary per request:
 
 Usage (from the repository root, inside the station's Jupyter container):
 
+    python3 tools/benchmark.py all --onnx models/AIPV1EMI0001_Yolo_Detector/yolov7tiny-640.onnx \\
+        --output tmp/inference-benchmark/my-run
+
+The all command prepares the graph, builds both engines and measures them. Use a
+new or empty output directory; failed builds leave their logs there for inspection.
+For separately prepared graphs and engines, the lower-level commands remain:
+
     python3 tools/benchmark.py raw-onnx SOURCE.onnx RAW.onnx
     python3 tools/benchmark.py run --onnx RAW.onnx \\
         --engine "TensorRT FP32=raw-fp32.engine" --engine "TensorRT FP16=raw-fp16.engine" \\
         --output RESULTS_DIR
 
-Build the two engines from RAW.onnx with trtexec first (see localdev.ipynb, section 3).
 This tool never restarts services, changes clocks or modifies the deployment graph.
 """
 import argparse
@@ -412,6 +418,43 @@ def markdown_table(report):
             "Raw model latency, one request at a time; not pipeline FPS.")
 
 
+def prepare_and_run(source_onnx, output_dir, *, trtexec=DEFAULT_TRTEXEC,
+                    workspace_mib=1024, deployment_engine=None):
+    """Prepare a fresh benchmark run without changing the deployment artifacts."""
+    source_onnx = Path(source_onnx).resolve(strict=True)
+    if deployment_engine is not None:
+        deployment_engine = Path(deployment_engine).resolve(strict=True)
+    if workspace_mib <= 0:
+        raise ValueError("workspace-mib must be positive")
+    output_dir = Path(output_dir)
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise FileExistsError(f"Use a new or empty benchmark output directory: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    raw_onnx = make_raw_onnx(source_onnx, output_dir / "raw.onnx")
+    engines = {}
+    for precision, flags in (("FP32", []), ("FP16", ["--fp16"])):
+        name = f"raw-{precision.lower()}"
+        engine, log = output_dir / f"{name}.engine", output_dir / f"{name}.log"
+        command = [
+            str(trtexec), f"--onnx={raw_onnx}", "--noTF32", *flags,
+            f"--workspace={workspace_mib}", "--minShapes=images:1x3x640x640",
+            "--optShapes=images:8x3x640x640", "--maxShapes=images:8x3x640x640",
+            f"--saveEngine={engine}", f"--timingCacheFile={output_dir / name}.cache",
+            "--skipInference",
+        ]
+        print(f"Building TensorRT {precision}; log: {log}", flush=True)
+        try:
+            with log.open("w") as output:
+                subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, check=True)
+        except subprocess.CalledProcessError:
+            print("\n".join(log.read_text().splitlines()[-60:]), file=sys.stderr)
+            raise
+        engines[f"TensorRT {precision}"] = engine
+    return run_benchmark(raw_onnx, engines, output_dir, source_onnx=source_onnx,
+                         deployment_engine=deployment_engine, trtexec=trtexec,
+                         workspace_mib=workspace_mib)
+
+
 def parse_engine(value):
     label, separator, path = value.partition("=")
     if not separator or not label or not path:
@@ -425,6 +468,12 @@ def main(argv=None):
     raw = commands.add_parser("raw-onnx", help="write an NMS-free copy of the ONNX graph")
     raw.add_argument("source")
     raw.add_argument("destination")
+    all_steps = commands.add_parser("all", help="prepare the graph, build both engines and measure")
+    all_steps.add_argument("--onnx", required=True, help="original deployment ONNX (never modified)")
+    all_steps.add_argument("--output", required=True, help="new or empty directory for this run")
+    all_steps.add_argument("--deployment-engine", help="deployment engine, recorded by hash")
+    all_steps.add_argument("--trtexec", default=DEFAULT_TRTEXEC)
+    all_steps.add_argument("--workspace-mib", type=int, default=1024)
     bench = commands.add_parser("run", help="measure ONNX Runtime and the TensorRT engines")
     bench.add_argument("--onnx", required=True, help="NMS-free ONNX graph (from raw-onnx)")
     bench.add_argument("--engine", action="append", type=parse_engine, required=True,
@@ -439,12 +488,17 @@ def main(argv=None):
     if args.command == "raw-onnx":
         make_raw_onnx(args.source, args.destination)
         return 0
-    engines = dict(args.engine)
-    assert len(engines) == len(args.engine), "engine labels must be unique"
-    assert ORT_LABEL not in engines, f"'{ORT_LABEL}' is reserved for the reference"
-    report = run_benchmark(args.onnx, engines, args.output, source_onnx=args.source_onnx,
-                           deployment_engine=args.deployment_engine, trtexec=args.trtexec,
-                           workspace_mib=args.workspace_mib)
+    if args.command == "all":
+        report = prepare_and_run(args.onnx, args.output, trtexec=args.trtexec,
+                                 workspace_mib=args.workspace_mib,
+                                 deployment_engine=args.deployment_engine)
+    else:
+        engines = dict(args.engine)
+        assert len(engines) == len(args.engine), "engine labels must be unique"
+        assert ORT_LABEL not in engines, f"'{ORT_LABEL}' is reserved for the reference"
+        report = run_benchmark(args.onnx, engines, args.output, source_onnx=args.source_onnx,
+                               deployment_engine=args.deployment_engine, trtexec=args.trtexec,
+                               workspace_mib=args.workspace_mib)
     print()
     print(markdown_table(report))
     print("\nOutput differences versus ONNX Runtime (not an accuracy score):")

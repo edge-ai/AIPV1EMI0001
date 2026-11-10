@@ -11,8 +11,11 @@ dashboard/package.json
 dashboard/package-lock.json
 dashboard/aipv1emi0001_dash/package.json
 dashboard/aipv1emi0001_dash/src/index.html
+dashboard/aipv1emi0001_dash/src/bootstrap.js
 dashboard/aipv1emi0001_dash/src/index.js
 dashboard/aipv1emi0001_dash/src/index.css
+dashboard/aipv1emi0001_dash/src/fonts/InterVariable.woff2
+dashboard/aipv1emi0001_dash/src/fonts/OFL.txt
 doc/README.md
 doc/USER_MANUAL.md
 doc/assets/hero.jpg

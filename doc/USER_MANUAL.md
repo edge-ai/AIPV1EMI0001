@@ -32,20 +32,21 @@ and `configs/config_tracker_NvDCF_perf.yml` (NvDCF tracker parameters).
 The AIP archive contains a Node-RED project in `logic/` and an offline Vue 3
 UIBuilder application in `dashboard/`. The dashboard shows:
 
-- the pipeline HLS stream;
+- the pipeline video stream (HLS or WebRTC, selected automatically from the
+  enabled pipeline outputs, with HLS precedence as in the station web UI);
 - live `car`, `person`, and `truck` counts;
 - a combined or per-source view;
 - ROI and line-crossing counts when those analytics are configured.
 
-To activate the dashboard, follow these steps. Step 8 of
-[`localdev.ipynb`](../localdev.ipynb) runs step 2 for its test pipeline:
+Dashboard deployment is separate from the build notebook. To activate it:
 
 1. Make sure the Node-RED runtime loads `@edgematrix/node-red-contrib-eais`
    0.7.10 and UIBuilder. Do not install the legacy
    `@edge-ai/node-red-contrib-eais` alongside it: both register the same node
    types. Have the station administrator arrange the migration and any restart;
    see [`logic/README.md`](../logic/README.md).
-2. From the extracted AIP package, inside the Node-RED container, run
+2. From the AIP directory in a station App-Builder terminal (or the extracted
+   package in an environment sharing Node-RED's project directory), run
    `bash bin/install-nodered-project.sh --pipeline <pipeline-id>`. It creates
    the project `nodered-aipv1emi0001-dashboard` under `/data/projects/`
    (override with `NODE_RED_PROJECTS_DIR`), installs the dashboard's browser
@@ -85,7 +86,8 @@ entry per input source:
     "ntp_timestamp": 1760000000000,
     "obj_counter": [2, 1, 0],
     "objInROIcnt": {"roi_label": 2},
-    "objLCCurrCnt": {"line_label": 1}
+    "objLCCurrCnt": {"line_label": 1},
+    "objLCCumCnt": {"line_label": 42}
   }
 ]
 ```
@@ -94,6 +96,8 @@ entry per input source:
   `["car", "person", "truck"]` (the `labels-rev3.txt` order).
 - `objInROIcnt` / `objLCCurrCnt` — per-label counts from the ROI / LCC analytics
   plugins (`{}` when no analytics values were reported for the frame).
+- `objLCCumCnt` — per-line running total of crossings since the pipeline
+  started, the counter drawn on the video.
 
 ### Merge mode (merge enabled, default 1 s window)
 
@@ -115,7 +119,8 @@ entry per input source:
     },
     "analytics_obj_cnt": {
       "objInROIcnt":  {"roi_label":  {"max_val": 2, "min_val": 0, "sum_val": 40}},
-      "objLCCurrCnt": {"line_label": {"max_val": 1, "min_val": 0, "sum_val": 3}}
+      "objLCCurrCnt": {"line_label": {"max_val": 1, "min_val": 0, "sum_val": 3}},
+      "objLCCumCnt":  {"line_label": {"max_val": 45, "min_val": 42, "last_val": 45}}
     }
   }
 }
@@ -133,7 +138,8 @@ falls back to the batch's reported source slots.
 
 Class `count_val` is the sum of per-frame counts, not a unique-object count;
 the mean and median are rounded to the nearest integer. ROI and line-crossing
-statistics include only values reported for that label. A label absent from the
+statistics include only values reported for that label. `objLCCumCnt` reports
+`last_val`, the latest running total in the window, instead of a sum. A label absent from the
 window is omitted, which does not establish whether an analytic is configured.
 The dashboard's all-source totals sum per-source maxima, not necessarily
 simultaneous observations; if a source is unavailable those totals are `N/A`.

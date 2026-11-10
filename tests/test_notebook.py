@@ -55,8 +55,12 @@ STUBS = {
     "eais-tools": """
         echo "eais-tools $*" >> "$CALLS"
         case "$1 $2" in
-            "aip build") python3 "$STUB_DIR/eais_build.py" ;;
-            "aip export") tar -czf "${AIP_ID}_dist.tgz" dist ;;
+            "aip build")
+                [ "${EAIS_BUILD_STATUS:-0}" = 0 ] || exit "$EAIS_BUILD_STATUS"
+                python3 "$STUB_DIR/eais_build.py" ;;
+            "aip export")
+                [ "${EAIS_EXPORT_STATUS:-0}" = 0 ] || exit "$EAIS_EXPORT_STATUS"
+                tar -czf "${AIP_ID}_dist.tgz" dist ;;
             "pipeline test") exit "${PIPELINE_TEST_STATUS:-0}" ;;
             "pipeline clean") echo "[]" > "$FIXTURES/pipelines.json" ;;
         esac
@@ -161,14 +165,20 @@ class NotebookStructureTests(unittest.TestCase):
                         'eais-tools aip export --uuid "$AIP_ID"',
                         'curl -fsS -X POST "$MS3/aiprocessor/scan/$AIP_ID?force=false"',
                         "eais-tools pipeline test", "eais-tools pipeline clean",
-                        "python3 tools/check_package.py", "python3 tools/benchmark.py run",
-                        'bin/install-nodered-project.sh --pipeline "$PIPELINE_ID"',
+                        "python3 tools/benchmark.py all",
                         "validate_specified_triton_config", "validate_ds_config"):
             self.assertIn(command, source)
         self.assertNotIn("eais-tools aip scan", source)
         for removed in ("config_diagnostic", "gst-launch", "tritonserver", "launch_triton_server",
-                        "sudo", "pip install", "docker ", "systemctl"):
+                        "sudo", "pip install", "docker ", "systemctl", "check_package"):
             self.assertNotIn(removed, source)
+
+    def test_node_red_deployment_is_outside_the_build_tutorial(self):
+        self.assertFalse({"nodered", "nodered-md", "open-dashboard"} & NOTEBOOK.keys())
+        source = "\n".join(CODE.values())
+        for removed in ("install-nodered-project", "npm", "/data/projects"):
+            self.assertNotIn(removed, source)
+        self.assertIn("[`logic/README.md`](logic/README.md)", MARKDOWN)
 
     def test_markdown_explains_the_pipeline_with_diagrams(self):
         self.assertGreaterEqual(MARKDOWN.count("```mermaid"), 1)
@@ -181,7 +191,7 @@ class NotebookStructureTests(unittest.TestCase):
         for name in ("README.md", "logic/README.md", "doc/USER_MANUAL.md"):
             with self.subTest(document=name):
                 self.assertIn(version, (ROOT / name).read_text())
-        self.assertIn(version, NOTEBOOK["nodered-md"][1])
+        self.assertNotIn("nodered-md", NOTEBOOK)
 
     def test_changelog_covers_manifest_version(self):
         changelog = (ROOT / "CHANGELOG.md").read_text()
@@ -245,38 +255,54 @@ class NotebookBehaviourTests(unittest.TestCase):
             (station.bin / "trtexec").write_text("#!/bin/bash\necho '&&&& FAILED'\n")
             self.assertNotEqual(station.run("smoke-test").returncode, 0)
 
-    def test_benchmark_is_optional_and_engines_differ_only_by_precision(self):
+    def test_benchmark_is_optional_and_delegates_to_one_tool_command(self):
         with tempfile.TemporaryDirectory() as directory:
             station = Station(directory)
-            for cell in ("bench-graph", "bench-build", "bench-run"):
-                result = station.run(cell)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("Skipped", result.stdout)
-            self.assertEqual(station.log(), [])
-            (station.root / "tmp/bench").mkdir(parents=True)
-            result = station.run("bench-build", RUN_BENCHMARKS="1")
+            result = station.run("bench-run")
             self.assertEqual(result.returncode, 0, result.stderr)
-            fp32, fp16 = station.log()
-            self.assertIn("--onnx=tmp/bench/raw.onnx", fp32)
-            self.assertIn("--noTF32", fp32)
-            normalize = lambda call: call.replace(" --fp16", "").replace("raw-fp16", "raw-fp32")
-            self.assertNotIn("--fp16", fp32)
-            self.assertEqual(normalize(fp16), fp32)
+            self.assertIn("Skipped", result.stdout)
+            self.assertEqual(station.log(), [])
+            self.assertFalse({"bench-graph", "bench-build"} & CODE.keys())
+            tool = station.root / "tools/benchmark.py"
+            tool.write_text(
+                "import os, sys\n"
+                "from pathlib import Path\n"
+                "Path(os.environ['CALLS']).write_text(' '.join(sys.argv[1:]))\n"
+                "sys.exit(int(os.environ.get('BENCHMARK_STATUS', '0')))\n")
+            result = station.run("bench-run", RUN_BENCHMARKS="1")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            (command,) = station.log()
+            self.assertTrue(command.startswith("all --onnx models/"))
+            for argument in ("--output tmp/bench", "--deployment-engine models/",
+                             "--trtexec trtexec", "--workspace-mib 1024"):
+                self.assertIn(argument, command)
+            result = station.run("bench-run", RUN_BENCHMARKS="1", BENCHMARK_STATUS="7")
+            self.assertEqual(result.returncode, 7)
 
-    def test_package_build_and_export_verify_exact_contents(self):
-        for extra, ok in ((None, True), ("models/AIPV1EMI0001_Yolo_Detector/source.onnx", False),
-                          ("logic/flows_cred.json", False), ("dashboard/node_modules/vue/index.js", False)):
-            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as directory:
+    def test_packaging_uses_native_eais_tools_without_a_custom_checker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            station = Station(directory)
+            station.add_package_sources()
+            (station.root / "tools/check_package.py").unlink()
+            build = station.run("package-build")
+            self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
+            archive = station.root / "AIPV1EMI0001_dist.tgz"
+            archive.write_text("stale archive")
+            export = station.run("package-export")
+            self.assertEqual(export.returncode, 0, export.stdout + export.stderr)
+            self.assertEqual(station.log(), [
+                "eais-tools aip build --uuid AIPV1EMI0001 --include-file .include",
+                "eais-tools aip export --uuid AIPV1EMI0001"])
+            check_package.check_archive(archive, check_package.check_dist(station.root))
+
+    def test_packaging_propagates_native_eais_failures(self):
+        for cell, environment in (("package-build", {"EAIS_BUILD_STATUS": "9"}),
+                                  ("package-export", {"EAIS_EXPORT_STATUS": "9"})):
+            with self.subTest(cell=cell), tempfile.TemporaryDirectory() as directory:
                 station = Station(directory)
-                station.add_package_sources()
-                env = {"EXTRA_DIST_FILE": extra} if extra else {}
-                build = station.run("package-build", **env)
-                self.assertEqual(build.returncode == 0, ok, build.stdout + build.stderr)
-                if ok:
-                    (station.root / "AIPV1EMI0001_dist.tgz").write_text("stale archive")
-                    export = station.run("package-export")
-                    self.assertEqual(export.returncode, 0, export.stdout + export.stderr)
-                    self.assertIn("archive AIPV1EMI0001_dist.tgz matches", export.stdout)
+                result = station.run(cell, **environment)
+                self.assertEqual(result.returncode, 9)
+                self.assertFalse((station.root / "AIPV1EMI0001_dist.tgz").exists())
 
     def test_registration_scans_only_the_target_without_forcing(self):
         aip = {"pk": "aip-pk", "unique_id": "AIPV1EMI0001", "version": AIP_VERSION}
@@ -416,24 +442,6 @@ class NotebookBehaviourTests(unittest.TestCase):
                 finally:
                     os.chdir(cwd)
 
-    def test_nodered_cell_delegates_to_the_install_script(self):
-        with tempfile.TemporaryDirectory() as directory:
-            station = Station(directory)
-            for folder in ("logic", "dashboard"):
-                shutil.copytree(ROOT / folder, station.root / folder,
-                                ignore=shutil.ignore_patterns("node_modules", "flows_cred.json"))
-            (station.root / "bin").mkdir()
-            shutil.copy2(ROOT / "bin/install-nodered-project.sh", station.root / "bin")
-            projects = Path(directory) / "projects"
-            result = station.run("nodered", PIPELINE_ID="P1", NODE_RED_PROJECTS_DIR=str(projects))
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            flows = json.loads((projects / "nodered-aipv1emi0001-dashboard/flows.json").read_text())
-            (callback,) = [n for n in flows if n.get("id") == "aipv1emi0001callback"]
-            self.assertEqual(callback["pipelineId"], "P1")
-            result = station.run("nodered", PIPELINE_ID="", NODE_RED_PROJECTS_DIR=str(projects))
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Run the pipeline check first", result.stderr)
-
 
 class InstallNodeRedProjectTests(unittest.TestCase):
     SCRIPT = "bin/install-nodered-project.sh"
@@ -478,6 +486,7 @@ class InstallNodeRedProjectTests(unittest.TestCase):
         tracked = subprocess.run(["git", "-C", str(self.project), "ls-files"], capture_output=True,
                                  text=True, check=True).stdout.split()
         self.assertIn("uibuilder/aipv1emi0001_dash/src/index.js", tracked)
+        self.assertIn("uibuilder/aipv1emi0001_dash/src/bootstrap.js", tracked)
         self.assertFalse([name for name in tracked if "node_modules" in name or "cred" in name])
         self.assertEqual(sorted(path.name for path in self.projects.iterdir()), [self.project.name])
 
@@ -560,6 +569,15 @@ class InstallNodeRedProjectTests(unittest.TestCase):
         result = self.install("--pipeline", "P1")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(list(self.projects.iterdir()), [])
+
+    def test_failed_replacement_preserves_the_existing_project(self):
+        self.assertEqual(self.install("--pipeline", "P1").returncode, 0)
+        original = (self.project / "flows.json").read_bytes()
+        (self.station.bin / "npm").write_text("#!/bin/bash\nexit 9\n")
+        result = self.install("--pipeline", "P2", "--force")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.project / "flows.json").read_bytes(), original)
+        self.assertEqual(list(self.projects.iterdir()), [self.project])
 
     def test_runs_from_any_directory_and_custom_project_name(self):
         result = self.install("--pipeline", "P1", "--project", "my-dashboard", cwd="/")
@@ -724,7 +742,7 @@ class PresentationTests(unittest.TestCase):
         self.assertIn("neither notebook trains a model from scratch", presentation.lower())
         self.assertIn("Neither notebook trains a model from scratch", presentation)
         self.assertIn("configuration files", presentation)
-        self.assertIn("encoded HLS video follows a separate path", presentation)
+        self.assertIn("encoded HLS or WebRTC video follows a separate path", presentation)
         self.assertIn("not a model-training walkthrough or blank project",
                       " ".join(MARKDOWN.split()))
         self.assertIn("Learning goals", MARKDOWN)
@@ -760,7 +778,6 @@ class PresentationTests(unittest.TestCase):
         providers = report["onnxruntime_node_placement"]["providers"]
         cuda = providers["CUDAExecutionProvider"]["node_count"]
         cpu = providers["CPUExecutionProvider"]["node_count"]
-        self.assertIn(f"{cuda} CUDA and {cpu} CPU nodes", guide)
         self.assertIn(f"{cuda} CUDA nodes and {cpu} CPU nodes", presentation)
 
     def test_public_content_has_no_station_identity(self):

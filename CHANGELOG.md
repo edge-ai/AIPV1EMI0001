@@ -2,11 +2,17 @@
 
 ## v6.1.0 - Unreleased
 
-- docs: Rewrite `localdev.ipynb` as a command-first build guide based on `eais-tools`, with Mermaid diagrams of the AIP, the runtime pipeline and the build steps
+- docs: Rewrite `localdev.ipynb` as a command-first build guide based on `eais-tools`, with a build sequence diagram; keep architecture explanations in the presentation
 - fix: Distinguish missing callback frames from zero detections and aggregate only reported analytics values
+- feat: Forward DeepStream's cumulative line-crossing count (`objLCCumCnt`) and show it on the dashboard next to the instant count
+- feat: Detect stream and merged callback delivery automatically; in stream mode keep each input's latest frame and mark samples older than 2 s unavailable
+- feat: Add a dashboard video source selector that controls the pipeline's shared tiler and follows changes made in the station web UI
+- style: Restyle the dashboard with the EdgeAI visual identity and bundle the Inter font so it renders on offline stations
 - ci: Check pull requests and pin the Hugging Face model revision used by notebooks and releases
 - docs: Add `presentation.ipynb`, a code-free talk companion on engineering Edge AI applications, with the reference benchmark table and chart
-- feat: Add `bin/install-nodered-project.sh` to install the Node-RED flow and dashboard as a project for a pipeline; `localdev.ipynb` now calls it and focuses on the step-by-step build
+- feat: Add standalone `bin/install-nodered-project.sh` to install the Node-RED flow and dashboard for a pipeline, outside the build notebook
+- feat: Add `tools/benchmark.py all` to prepare, build and measure the benchmark with one optional notebook command
+- docs: Use native EAIS Tools build/export in the notebook; keep additional package safeguards in release CI only
 - feat: Move the package checks and the benchmark harness to `tools/check_package.py` and `tools/benchmark.py`; publish the reference results under `doc/benchmarks/`
 - ci: Validate the release package and archive with `tools/check_package.py`
 - test: Add offline tests for the notebooks, tools and published benchmark results
@@ -19,7 +25,7 @@
 - feat: Compare ONNX Runtime CUDA and TensorRT FP32/FP16 using a shared timing harness
 - fix: Validate configuration and distribution file hashes with EAIS Tools
 - ci: Publish release archives and checksums to GitHub Releases
-- fix: Clearly distinguish latest callback counts from delayed HLS playback; defer inferred synchronization
+- feat: Automatically select dashboard HLS or WebRTC playback from pipeline settings, matching the station web UI without a transport selector; counts remain the latest received metadata
 - fix: Exclude manual snapshots and unused browser command wiring from the dashboard
 - chore: Pin the public `@edgematrix/node-red-contrib-eais` 0.7.10 and isolate the Node-RED test runtime from the distributable project
 - fix: Select the callback pipeline directly to avoid the 0.7.6 editor's environment-reference issue

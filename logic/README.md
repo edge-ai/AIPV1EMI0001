@@ -34,8 +34,23 @@ npm install --save-exact --registry=https://registry.npmjs.org/ \
 ```
 
 Copying this project's `package.json` records its dependencies; it does not
-by itself install or activate them in the Node-RED runtime. The notebook's
+by itself install or activate them in the Node-RED runtime. The standalone
 `bin/install-nodered-project.sh` installs browser libraries in `uibuilder/` only.
+
+## Install the project
+
+Deployment is independent of `localdev.ipynb`. From the AIP root in a station
+App-Builder terminal, run:
+
+```bash
+bash bin/install-nodered-project.sh --pipeline <pipeline-id>
+```
+
+Choose the ID of an existing pipeline running this AIP. The installer requires
+`python3`, `jq`, `npm`, `git`, `tar`, npm registry access and write access to `/data/projects`
+(override with `NODE_RED_PROJECTS_DIR`). `--project <name>` chooses another project
+name; `--force` replaces an existing copy after preparation succeeds. It does not
+open the project or restart Node-RED.
 
 ## Configure
 
@@ -44,8 +59,8 @@ by itself install or activate them in the Node-RED runtime. The notebook's
 3. Deploy. Repeat these steps when switching pipelines.
 
 The checked-in flow deliberately leaves the pipeline selection empty;
-`bin/install-nodered-project.sh --pipeline <id>` preselects it in the installed copy. Select a pipeline
-in the callback node rather than putting an environment-variable reference in
+`bin/install-nodered-project.sh --pipeline <id>` preselects it in the installed
+copy. Select a pipeline in the callback node rather than putting an environment-variable reference in
 that field. When Node-RED admin authentication is enabled, the pipeline selector
 requires `flows.read` permission, and refreshing the callback metadata cache
 requires `flows.write`.
@@ -64,20 +79,24 @@ is included in this flow. If a new UIBuilder instance is not served after
 deployment, follow the station's UIBuilder instructions; a Node-RED restart
 may be required.
 
-## Playback and metadata
+## Video and metadata
 
-The dashboard displays the latest received metadata independently of the delayed
-HLS video. They are **not synchronized**. For batched delivery the normalizer uses
-the last window in the batch; counts are window maxima where applicable, not
-necessarily per-frame values. The timestamp is the normalization time, not the
-video frame's capture time.
+The dashboard reads the pipeline's output settings from MS3 and automatically
+uses HLS or WebRTC, with the same HLS precedence as the station web UI.
+Enable the required output in the pipeline; there is no dashboard transport selector.
+The normalizer automatically distinguishes per-frame source records from merged
+statistics. Stream callbacks can list all inputs while providing a frame for only
+some of them; null placeholders do not erase another input's latest valid frame.
+Updates are immediate, with no deliberate display delay. On each callback,
+retained stream samples older than two seconds are marked unavailable. This
+expiry check is message-driven, not a timer that detects a completely silent feed.
+Merged statistics use maxima from the last delivered merge window, without
+carrying counts over from earlier windows. A delivery-mode or pipeline change
+clears the retained stream state.
 
-Segment-name/frame-number synchronization is not included: variable durations,
-pipeline restarts, and differing source clocks make that inference unreliable.
-Accurate alignment requires a shared timing contract between video and metadata.
-The dashboard neither buffers callback windows for alignment nor sends commands
-back to the station. A station snapshot would capture a newer frame than the one
-visible in HLS, so manual snapshot controls and their wiring are excluded.
+The timestamp is the normalization time, not the video frame's capture time.
+No frame-level alignment is applied. The dashboard directly controls the shared
+video tiler through MS3; no browser commands are wired back into this Node-RED flow.
 
 ## Regression checks
 
@@ -104,9 +123,9 @@ The normalizer sends:
 {
   "type": "aipv1emi0001.metrics",
   "timestamp": "2026-09-25T00:00:00.000Z",
-  "aggregation": "latest frame or merge-window maximum",
+  "delivery": "stream",
+  "aggregation": "Latest frame per source",
   "pipeline": {"id": "...", "name": "..."},
-  "hlsUrl": "/ms3/pipeline/<pipeline-id>/hls",
   "sources": [
     {
       "id": "0",
@@ -115,23 +134,35 @@ The normalizer sends:
       "counts": {"car": 4, "person": 2, "truck": 1},
       "total": 7,
       "roi": {"parking": 3},
-      "lineCrossing": {"entrance": 5}
+      "lineCrossing": {"entrance": 0},
+      "lineCrossingCumulative": {"entrance": 42}
     }
   ],
   "totals": {
     "objects": 7,
     "classes": {"car": 4, "person": 2, "truck": 1},
     "roi": {"parking": 3},
-    "lineCrossing": {"entrance": 5}
+    "lineCrossing": {"entrance": 0},
+    "lineCrossingCumulative": {"entrance": 42}
   }
 }
 ```
 
+`delivery` is `stream` for per-frame records and `batch` for merged records;
+`aggregation` is respectively `Latest frame per source` or `Merge-window maximum`.
+Push envelopes are unwrapped to their last record before interpreting its data.
 For merged callback data, the displayed count is `max_val` from the latest
-merge window. For passthrough data, it is the latest frame count. A source
+merge window. For stream data, it is the latest valid frame count per input. A source
 with no observed frames has `available: false` and `null` class counts and
 total; the all-source totals are also `null` when any source is unavailable.
-The dashboard displays these values as `N/A`. Analytics labels are reported
+The dashboard displays these values as `N/A`. `lineCrossing` is the instant
+count (`objLCCurrCnt`: crossings in the latest frame, or the window `max_val`);
+`lineCrossingCumulative` is DeepStream's running total per line (`objLCCumCnt`,
+the counter drawn on the video), using the window's `last_val` in batch delivery.
+It requires AIP 6.1.0 or later; with older callbacks it is empty and shown as
+`N/A`. Analytics labels are reported
 only when their values were observed; absence does not prove that an analytic
 is unconfigured. Totals combine reported per-source values and need not
-represent a simultaneous frame. The timestamp is not a freshness alarm.
+represent a simultaneous frame. Stream state belongs to the normalizer's node
+context; it is not a frame-synchronization buffer. The timestamp is not a
+freshness alarm.

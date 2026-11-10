@@ -3,11 +3,13 @@ import importlib.util
 import io
 import json
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -119,6 +121,141 @@ class CheckPackageTests(unittest.TestCase):
 
 
 class BenchmarkTests(unittest.TestCase):
+    def test_all_steps_build_matching_engines_before_measuring(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, deployment = root / "deployment.onnx", root / "deployment.engine"
+            source.write_text("original model")
+            deployment.write_text("original engine")
+            output = root / "benchmark"
+            events, commands = [], []
+
+            def raw_graph(source_path, destination):
+                events.append("graph")
+                destination.write_text("raw graph")
+                return destination
+
+            def build(command, **kwargs):
+                events.append("build")
+                commands.append(command)
+                self.assertEqual(kwargs["stderr"], subprocess.STDOUT)
+                self.assertTrue(kwargs["check"])
+                engine = next(arg.split("=", 1)[1] for arg in command if arg.startswith("--saveEngine="))
+                Path(engine).write_text("benchmark engine")
+
+            def measure(*args, **kwargs):
+                events.append("measure")
+                return {"complete": True}
+
+            with patch.object(benchmark, "make_raw_onnx", side_effect=raw_graph), \
+                    patch.object(benchmark.subprocess, "run", side_effect=build), \
+                    patch.object(benchmark, "run_benchmark", side_effect=measure) as measured:
+                report = benchmark.prepare_and_run(source, output, deployment_engine=deployment,
+                                                   trtexec="trtexec-test", workspace_mib=768)
+            self.assertEqual(report, {"complete": True})
+            self.assertEqual(events, ["graph", "build", "build", "measure"])
+            fp32, fp16 = commands
+            self.assertEqual(fp32[0], "trtexec-test")
+            for flag in (f"--onnx={output / 'raw.onnx'}", "--noTF32", "--workspace=768",
+                         "--minShapes=images:1x3x640x640", "--optShapes=images:8x3x640x640",
+                         "--maxShapes=images:8x3x640x640", "--skipInference"):
+                self.assertIn(flag, fp32)
+            self.assertNotIn("--fp16", fp32)
+            self.assertIn("--fp16", fp16)
+            self.assertEqual([arg.replace("raw-fp16", "raw-fp32") for arg in fp16 if arg != "--fp16"],
+                             fp32)
+            measured.assert_called_once_with(
+                output / "raw.onnx",
+                {"TensorRT FP32": output / "raw-fp32.engine",
+                 "TensorRT FP16": output / "raw-fp16.engine"},
+                output, source_onnx=source.resolve(), deployment_engine=deployment.resolve(),
+                trtexec="trtexec-test", workspace_mib=768)
+            self.assertEqual(source.read_text(), "original model")
+            self.assertEqual(deployment.read_text(), "original engine")
+
+    def test_all_steps_reject_existing_results_and_invalid_inputs_before_building(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "deployment.onnx"
+            source.write_text("original")
+            output = root / "new-results"
+            with patch.object(benchmark, "make_raw_onnx") as graph, \
+                    patch.object(benchmark.subprocess, "run") as build:
+                with self.assertRaises(FileExistsError):
+                    benchmark.prepare_and_run(source, root)
+                with self.assertRaises(FileNotFoundError):
+                    benchmark.prepare_and_run(root / "missing.onnx", output)
+                with self.assertRaises(FileNotFoundError):
+                    benchmark.prepare_and_run(source, output, deployment_engine=root / "missing.engine")
+                with self.assertRaises(ValueError):
+                    benchmark.prepare_and_run(source, output, workspace_mib=0)
+                graph.assert_not_called()
+                build.assert_not_called()
+            self.assertFalse(output.exists())
+            self.assertEqual(source.read_text(), "original")
+
+    def test_all_steps_abort_on_failed_build_and_preserve_its_log(self):
+        for fail_at in (1, 2):
+            with self.subTest(fail_at=fail_at), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "deployment.onnx"
+                source.write_text("original")
+                output, error = root / "benchmark", io.StringIO()
+                calls = []
+
+                def build(command, **kwargs):
+                    calls.append(command)
+                    kwargs["stdout"].write("builder diagnostic\n")
+                    if len(calls) == fail_at:
+                        raise subprocess.CalledProcessError(9, command)
+
+                with patch.object(benchmark, "make_raw_onnx", return_value=output / "raw.onnx"), \
+                        patch.object(benchmark.subprocess, "run", side_effect=build), \
+                        patch.object(benchmark, "run_benchmark") as measure, \
+                        contextlib.redirect_stderr(error), contextlib.redirect_stdout(io.StringIO()):
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        benchmark.prepare_and_run(source, output)
+                self.assertEqual(len(calls), fail_at)
+                measure.assert_not_called()
+                self.assertIn("builder diagnostic", error.getvalue())
+                failed_log = output / ("raw-fp32.log" if fail_at == 1 else "raw-fp16.log")
+                self.assertEqual(failed_log.read_text(), "builder diagnostic\n")
+
+    def test_graph_preparation_failure_prevents_builds_and_measurement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.onnx"
+            source.write_text("original")
+            with patch.object(benchmark, "make_raw_onnx", side_effect=ValueError("invalid graph")), \
+                    patch.object(benchmark.subprocess, "run") as build, \
+                    patch.object(benchmark, "run_benchmark") as measure:
+                with self.assertRaisesRegex(ValueError, "invalid graph"):
+                    benchmark.prepare_and_run(source, root / "benchmark")
+                build.assert_not_called()
+                measure.assert_not_called()
+
+    def test_all_command_dispatches_to_the_complete_workflow(self):
+        report = json.loads((ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0.json").read_text())
+        with patch.object(benchmark, "prepare_and_run", return_value=report) as complete, \
+                contextlib.redirect_stdout(io.StringIO()):
+            code = benchmark.main(["all", "--onnx", "source.onnx", "--output", "results",
+                                   "--deployment-engine", "deployment.engine",
+                                   "--trtexec", "trtexec-test", "--workspace-mib", "512"])
+        self.assertEqual(code, 0)
+        complete.assert_called_once_with("source.onnx", "results", trtexec="trtexec-test",
+                                         workspace_mib=512, deployment_engine="deployment.engine")
+
+    def test_run_command_still_accepts_prebuilt_benchmark_artifacts(self):
+        report = json.loads((ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0.json").read_text())
+        with patch.object(benchmark, "run_benchmark", return_value=report) as measure, \
+                contextlib.redirect_stdout(io.StringIO()):
+            code = benchmark.main(["run", "--onnx", "raw.onnx",
+                                   "--engine", "TensorRT FP16=raw.engine", "--output", "results"])
+        self.assertEqual(code, 0)
+        measure.assert_called_once_with("raw.onnx", {"TensorRT FP16": "raw.engine"}, "results",
+                                        source_onnx=None, deployment_engine=None,
+                                        trtexec=benchmark.DEFAULT_TRTEXEC, workspace_mib=None)
+
     def test_ort_profile_summarizes_unique_executed_nodes(self):
         def node(index, provider, operation):
             return {"cat": "Node", "name": f"{operation}_{index}_kernel_time",

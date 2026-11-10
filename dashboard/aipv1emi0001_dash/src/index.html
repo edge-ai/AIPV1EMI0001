@@ -6,17 +6,21 @@
     <title>YOLOv7 Object Counts</title>
     <meta name="description" content="Live AIPV1EMI0001 object-counting dashboard">
     <link rel="stylesheet" href="./index.css">
-    <script type="module" async src="./index.js"></script>
+    <script type="module" src="./bootstrap.js"></script>
 </head>
 <body>
     <!--
       THESIS: A live control-room viewport where video and counts are read together; it refuses a grid of interchangeable KPI cards.
-      OWN-WORLD: Deep navy instrumentation panels, hairline steel borders, cyan live-state accents, and compact tabular telemetry.
+      OWN-WORLD: EdgeAI Slidev's Inter typography and blue palette, light station surfaces, compact controls, and a dark video frame. All assets are served locally.
       STORY: Confirm the pipeline is live, read object volume by class, then inspect ROI and crossing counts without leaving the stream.
       FIRST VIEWPORT: Identity and connection state above a dominant 16:9 feed with a dense count console fixed beside it.
-      FORM: Split-screen operations console, user-pinned direction; seed: user-pinned.
+      FORM: Existing split-screen operations console in the user-pinned EdgeAI theme; seed: user-pinned.
     -->
-    <div id="app">
+    <div id="dashboard-startup" class="startup" role="status">
+        <h1>Object counting</h1>
+        <p id="dashboard-startup-message">Loading dashboard. Make sure JavaScript is enabled.</p>
+    </div>
+    <div id="app" v-cloak>
         <header class="header">
             <div>
                 <div class="title-line">
@@ -34,47 +38,61 @@
 
         <main>
             <section class="toolbar">
-                <label>
-                    Metrics scope
-                    <select v-model="selectedSource">
-                        <option value="all">All sources</option>
-                        <option v-for="source in sources" :key="source.id" :value="source.id">
-                            {{ source.name }}
-                        </option>
-                    </select>
-                </label>
+                <div class="source-control">
+                    <div class="source-picker">
+                        <label for="video-source">Video source</label>
+                        <select id="video-source" :value="pendingSource ?? selectedSource"
+                            :disabled="!selectedSource || !videoSources.length || pendingSource !== null"
+                            aria-describedby="source-help" @change="syncVideoSelection($event.target.value)">
+                            <option value="" disabled>{{ !pipeline.id ? "Waiting for pipeline" : selectionRequest ? "Reading selection…" : "Selection unavailable" }}</option>
+                            <option value="all">All sources</option>
+                            <option v-for="source in videoSources" :key="source.id" :value="source.id">
+                                {{ source.name }}
+                            </option>
+                        </select>
+                    </div>
+                    <p id="source-help" class="hint">Shared with all viewers. Counts follow this selection.</p>
+                    <p v-if="pendingSource !== null" class="hint" role="status">Switching video source…</p>
+                    <p v-else-if="selectionError && !selectionChangeError" class="source-error" role="status">{{ selectionError }}</p>
+                    <p v-else-if="pipeline.id && !videoSources.length" class="source-error" role="status">Video source list unavailable. Retrying automatically.</p>
+                    <p v-if="selectionChangeError" class="source-error" role="alert">{{ selectionChangeError }}</p>
+                </div>
                 <span class="hint">{{ aggregation }}</span>
             </section>
 
             <section class="hero-grid">
                 <article class="video-card">
                     <div class="card-heading">
-                        <h2>Pipeline playback</h2>
-                        <span class="pill" :class="'video-' + videoState">{{ videoState }}</span>
+                        <h2>Live video</h2>
+                        <span class="video-status" :class="'video-' + videoState">{{ videoState }}</span>
                     </div>
                     <div class="video-frame">
-                        <video v-if="hlsUrl" ref="video" muted autoplay playsinline controls></video>
-                        <div v-else class="empty">Waiting for a pipeline identifier.</div>
+                        <video v-if="pipeline.id" ref="video" muted autoplay playsinline
+                            :controls="videoState === 'playing' || videoState === 'ready'"></video>
+                        <p v-if="!pipeline.id" class="video-overlay" role="status">Waiting for a pipeline.</p>
+                        <p v-else-if="videoState === 'loading' || videoState === 'waiting'" class="video-overlay" role="status">Connecting to video…</p>
+                        <div v-else-if="videoState === 'error' || videoState === 'disconnected' || videoState === 'disabled'"
+                            class="video-overlay" role="status">
+                            <p :class="{ 'video-overlay-error': videoState !== 'disabled' }">{{ videoError || "Video disconnected." }}</p>
+                            <button type="button" class="video-retry" @click="connectVideo(true)">Retry video</button>
+                        </div>
                     </div>
-                    <p class="playback-note">Delayed HLS video. Counts show the latest received metadata and are not synchronized with this playback.</p>
+                    <p v-if="videoState === 'ready' && videoError" class="video-hint" role="status">{{ videoError }}</p>
                 </article>
 
                 <article class="counter-panel">
                     <div class="counter-heading">
                         <h2>Latest counts</h2>
-                        <span>{{ selectedSource === "all" ? sources.length + " sources" : selectedSourceName }}</span>
+                        <span>{{ selectedSource === "all" ? "All sources" : selectedSourceName }}</span>
                     </div>
                     <div class="total-row">
                         <span>All objects</span>
                         <strong>{{ formatCount(scopedTotal) }}</strong>
                     </div>
-                    <p v-if="sources.length && scopedTotal == null" class="hint" role="status">Some metrics are unavailable for this window.</p>
+                    <p v-if="selectedSource && sources.length && scopedTotal == null" class="hint" role="status">{{ delivery === "stream" ? "Waiting for a recent frame from every selected source." : "Some metrics are unavailable for this window." }}</p>
                     <div class="class-list" aria-label="Object counts by class">
                         <div v-for="item in classCards" :key="item.label" class="class-row">
-                            <span class="class-name">
-                                <i :class="'class-' + item.label"></i>
-                                {{ item.label }}
-                            </span>
+                            <span class="class-name">{{ item.label }}</span>
                             <strong>{{ item.value }}</strong>
                         </div>
                     </div>
@@ -97,10 +115,15 @@
                 <article class="detail-card">
                     <div class="card-heading">
                         <h2>Line crossings</h2>
+                        <span class="card-note">Total since pipeline start</span>
                     </div>
                     <div v-if="lineRows.length" class="rows">
                         <div v-for="row in lineRows" :key="row.label" class="count-row">
-                            <span>{{ row.label }}</span><strong>{{ row.value }}</strong>
+                            <span>{{ row.label }}</span>
+                            <span class="line-values">
+                                <strong>{{ row.value }}</strong>
+                                <small>instant {{ row.instant }}</small>
+                            </span>
                         </div>
                     </div>
                     <div v-else class="empty compact">No line-crossing data in the latest window.</div>
@@ -115,7 +138,7 @@
     </div>
 
     <script nomodule>
-        document.getElementById("app").textContent = "This dashboard requires JavaScript modules.";
+        document.getElementById("dashboard-startup-message").textContent = "This dashboard requires JavaScript modules.";
     </script>
 </body>
 </html>
