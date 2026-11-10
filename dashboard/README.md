@@ -7,6 +7,33 @@ air-gapped EdgeAI Station without CDN access.
 The UIBuilder instance URL is `aipv1emi0001_dash`. Its source files are under
 `aipv1emi0001_dash/src/`, matching the UIBuilder project layout.
 
+## Theme and offline assets
+
+The light theme follows the EdgeAI Slidev theme and its canonical brand kit in
+`edge-ai/aibox-eais-slidev`, revision
+`a1f7a2fc553d645a0692c2b3b1e4379a91f0fa44`:
+`theme/styles/tokens.css` and `brand/generated/css/brand.css`, derived from the
+Edgematrix Visual Identity Guidelines (2025-02-07). The required values are
+copied into `src/index.css`; no private package, remote stylesheet, CDN, or
+Slidev runtime is needed. White panels, restrained blue accents, compact type,
+and 4px corners surround a dark video frame. See [`../DESIGN.md`](../DESIGN.md)
+for the dashboard's usage rules and accessibility adaptations.
+
+Inter 4.1 is bundled as `src/fonts/InterVariable.woff2`, unmodified from
+[`rsms/inter` tag `v4.1`](https://github.com/rsms/inter/blob/v4.1/docs/font-files/InterVariable.woff2)
+(upstream Git blob `5a8d3e72ad7ffb62af3b146e1b1f54ab5813a212`).
+Its SIL Open Font License is included at `src/fonts/OFL.txt`. The font is served
+from the dashboard's own origin; system fonts remain the fallback while it
+loads. Both files are explicitly included in the AIP package and copied by the
+standalone Node-RED installer.
+
+Offline operation means the browser needs only the station, not the Internet.
+Vue, hls.js, and UIBuilder must already be installed locally. The standalone
+installer's existing `npm ci` provisioning step still needs registry access or
+a pre-populated package cache; it is not an air-gapped dependency installer.
+
+## Live data and video
+
 The page consumes the normalized `aipv1emi0001.metrics` envelope documented in
 [`../logic/README.md`](../logic/README.md) and displays live video, object
 counts, ROI counts, and line crossings. Each line shows its running total since

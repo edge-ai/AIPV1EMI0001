@@ -892,9 +892,11 @@ test("integration package includes runtime assets, excludes credentials, and des
     for (const file of ["logic/flows.json", "logic/package.json", "logic/package-lock.json",
         "dashboard/package.json", "dashboard/package-lock.json",
         "dashboard/aipv1emi0001_dash/src/bootstrap.js",
+        "dashboard/aipv1emi0001_dash/src/fonts/InterVariable.woff2",
+        "dashboard/aipv1emi0001_dash/src/fonts/OFL.txt",
         ...["html", "js", "css"].map((ext) => `dashboard/aipv1emi0001_dash/src/index.${ext}`)]) {
         assert.ok(bundled(file), `${file} not packaged`);
-        assert.ok(read(file).length > 0);
+        assert.ok(fs.statSync(path.join(root, file)).size > 0);
     }
     assert.equal(bundled("logic/flows_cred.json"), false);
     const html = read("dashboard/aipv1emi0001_dash/src/index.html");
@@ -911,4 +913,28 @@ test("integration package includes runtime assets, excludes credentials, and des
         assert.doesNotMatch(read(`dashboard/aipv1emi0001_dash/src/index.${ext}`),
             /snapshot|syncOffset|syncEnabled|playingFrame|bufferWindows|uibuilder\.send/);
     }
+});
+
+test("dashboard theme and fonts load locally without external asset imports", () => {
+    const src = "dashboard/aipv1emi0001_dash/src";
+    const html = read(`${src}/index.html`);
+    const css = read(`${src}/index.css`);
+    for (const [, asset] of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
+        assert.ok(asset.startsWith("./"), `non-local asset: ${asset}`);
+        assert.ok(fs.existsSync(path.join(root, src, asset)), `missing asset: ${asset}`);
+    }
+    assert.doesNotMatch(css, /@import\b/);
+    for (const [, asset] of css.matchAll(/url\(["']?([^"')]+)["']?\)/g)) {
+        assert.ok(asset.startsWith("./"), `non-local CSS asset: ${asset}`);
+        assert.ok(fs.existsSync(path.join(root, src, asset)), `missing CSS asset: ${asset}`);
+    }
+    for (const file of ["index.js", "bootstrap.js"]) {
+        assert.doesNotMatch(read(`${src}/${file}`), /["'`]\s*(?:https?:|\/\/)/i);
+    }
+    assert.match(css, /@font-face\s*\{[^}]*font-family:\s*"Inter"/);
+    assert.match(css, /font-display:\s*swap/);
+    const font = fs.readFileSync(path.join(root, src, "fonts/InterVariable.woff2"));
+    assert.equal(font.subarray(0, 4).toString(), "wOF2");
+    assert.equal(font.readUInt32BE(8), font.length, "complete WOFF2 file");
+    assert.match(read(`${src}/fonts/OFL.txt`), /SIL OPEN FONT LICENSE Version 1\.1/);
 });

@@ -11,10 +11,10 @@
 <body>
     <!--
       THESIS: A live control-room viewport where video and counts are read together; it refuses a grid of interchangeable KPI cards.
-      OWN-WORLD: Deep navy instrumentation panels, hairline steel borders, cyan live-state accents, and compact tabular telemetry.
+      OWN-WORLD: EdgeAI Slidev's Inter typography and blue palette, light station surfaces, compact controls, and a dark video frame. All assets are served locally.
       STORY: Confirm the pipeline is live, read object volume by class, then inspect ROI and crossing counts without leaving the stream.
       FIRST VIEWPORT: Identity and connection state above a dominant 16:9 feed with a dense count console fixed beside it.
-      FORM: Split-screen operations console, user-pinned direction; seed: user-pinned.
+      FORM: Existing split-screen operations console in the user-pinned EdgeAI theme; seed: user-pinned.
     -->
     <div id="dashboard-startup" class="startup" role="status">
         <h1>Object counting</h1>
@@ -64,7 +64,7 @@
                 <article class="video-card">
                     <div class="card-heading">
                         <h2>Live video</h2>
-                        <span class="pill" :class="'video-' + videoState">{{ videoState }}</span>
+                        <span class="video-status" :class="'video-' + videoState">{{ videoState }}</span>
                     </div>
                     <div class="video-frame">
                         <video v-if="pipeline.id" ref="video" muted autoplay playsinline
@@ -92,10 +92,7 @@
                     <p v-if="selectedSource && sources.length && scopedTotal == null" class="hint" role="status">{{ delivery === "stream" ? "Waiting for a recent frame from every selected source." : "Some metrics are unavailable for this window." }}</p>
                     <div class="class-list" aria-label="Object counts by class">
                         <div v-for="item in classCards" :key="item.label" class="class-row">
-                            <span class="class-name">
-                                <i :class="'class-' + item.label"></i>
-                                {{ item.label }}
-                            </span>
+                            <span class="class-name">{{ item.label }}</span>
                             <strong>{{ item.value }}</strong>
                         </div>
                     </div>

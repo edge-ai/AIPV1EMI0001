@@ -6,27 +6,47 @@ The AIPV1EMI0001 dashboard is an operations console, not a reporting portal.
 Its first viewport keeps live video and current counts visible together so an
 operator can confirm pipeline behavior without switching context.
 
+Use the EdgeAI Slidev theme and its canonical brand kit as visual authority,
+not an independently invented dashboard palette. The pinned source is
+`edge-ai/aibox-eais-slidev` revision
+`a1f7a2fc553d645a0692c2b3b1e4379a91f0fa44`, particularly
+`theme/styles/tokens.css` and `brand/generated/css/brand.css`, derived from the
+Edgematrix Visual Identity Guidelines (2025-02-07).
+
+Operators enter from the light station web UI, so the surrounding dashboard
+stays light; only the video letterbox is dark. No gradients, glows, glass
+surfaces, or decorative class colours are used.
+
 ## Color
 
-- `#07111f`: page background
-- `#101d2d`: primary panel surface
-- `#15263a`: raised panel surface
-- `#263b52`: borders and separators
-- `#edf6ff`: primary text
-- `#8ea5ba`: secondary text
-- `#35d5e7`: live state and primary telemetry emphasis
-- `#55db9c`: healthy/connected and person count marker
-- `#f5b942`: warning and truck count marker
-- `#ff6b6b`: disconnected/error
+- `#eff2f7`: application page background
+- `#ffffff`: panel surface
+- `#f5f9ff`: Blue-50 secondary surface
+- `#dee2e6`: dividers
+- `#343a40`: headings and counts
+- `#495057`: secondary text and labels
+- `#3b82f6`: Blue-500 focus and activity indicators
+- `#326fd1`: Blue-600 button background
+- `#1d4ed8`: active blue and button hover
+- `#22c55e`, `#f59e0b`, `#ef4444`: success, warning, and error markers
+- `#111827` / `#f9fafb`: video background / overlay text
 
-Cyan is reserved for live state and important telemetry. It is not a general
-decorative accent.
+Accessibility adaptations: use the brand's body colour instead of its faint
+`#9e9e9e` label colour for small text; `#6b7280` provides a visible control border.
+Small error text uses darker `#b91c1c`, and white button text sits on Blue-600
+rather than Blue-500. Status markers retain the canonical brand colours but
+always have a readable text label; colour alone never communicates state.
 
 ## Typography
 
-Use the operating system sans-serif stack for reliable offline rendering.
-Headings are compact and fixed-size; changing measurements use tabular numerals.
-Monospace is not used as a visual shorthand for technical content.
+Inter 4.1 is bundled locally with its SIL Open Font License, using one variable
+WOFF2 file and `font-display: swap`. No external font service is permitted.
+The fallback is the operating system sans-serif stack.
+
+Use the brand's 14px body/card-title and 17.5px page-title scale, expressed in
+rem, with 12px helper text. Changing measurements use tabular numerals, with
+the all-object total at 40px. Weights are 400, 600, and 700. Monospace is not
+used as a visual shorthand for technical content.
 
 ## Layout
 
@@ -36,10 +56,22 @@ below, these regions stack into one column without changing the reading order.
 
 ## Components and states
 
-- Panels use one radius, border, and surface treatment.
-- Status pills communicate video waiting, loading, ready, playing, disabled, disconnected, and error.
+- Panels and controls use the Slidev theme's 4px small radius.
+- White panels use a subtle offset shadow; data rows use dividers, not nested cards.
+- Compact text-and-dot indicators communicate video waiting, loading, ready,
+  playing, disabled, disconnected, and error, without glows or uppercase pills.
 - The player follows pipeline output settings; no HLS/WebRTC selector is shown.
 - Video errors expose a retry action; disabled outputs show a placeholder.
-- The source selector uses the browser's standard control behavior.
+- The source selector uses the browser's standard control behavior and a
+  visible keyboard focus ring.
 - Empty states explain what data or pipeline configuration is missing.
 - Motion is limited to the waiting-state pulse and respects reduced-motion.
+
+## Offline delivery
+
+The dashboard has no build step or runtime dependency on the Slidev package.
+Token values live in `index.css`; the font and license live in `src/fonts/`.
+Every new runtime asset must be listed explicitly in `.include` so the AIP
+package remains self-contained. Browser libraries are served by the station's
+local UIBuilder installation. Do not add CDN imports, remote fonts, or
+external image requests.
