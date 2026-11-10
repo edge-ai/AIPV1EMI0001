@@ -35,7 +35,7 @@ npm install --save-exact --registry=https://registry.npmjs.org/ \
 
 Copying this project's `package.json` records its dependencies; it does not
 by itself install or activate them in the Node-RED runtime. The notebook's
-`npm ci` in `uibuilder/` installs browser libraries only.
+`bin/install-nodered-project.sh` installs browser libraries in `uibuilder/` only.
 
 ## Configure
 
@@ -43,8 +43,8 @@ by itself install or activate them in the Node-RED runtime. The notebook's
 2. Open **AIPV1EMI0001 callback** and select the pipeline running this AIP.
 3. Deploy. Repeat these steps when switching pipelines.
 
-The checked-in flow deliberately leaves the pipeline selection empty; the
-notebook preselects its test pipeline in the installed copy. Select a pipeline
+The checked-in flow deliberately leaves the pipeline selection empty;
+`bin/install-nodered-project.sh --pipeline <id>` preselects it in the installed copy. Select a pipeline
 in the callback node rather than putting an environment-variable reference in
 that field. When Node-RED admin authentication is enabled, the pipeline selector
 requires `flows.read` permission, and refreshing the callback metadata cache
