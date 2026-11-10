@@ -47,7 +47,7 @@ bash bin/install-nodered-project.sh --pipeline <pipeline-id>
 ```
 
 Choose the ID of an existing pipeline running this AIP. The installer requires
-`jq`, `npm`, `git`, `tar`, npm registry access and write access to `/data/projects`
+`python3`, `jq`, `npm`, `git`, `tar`, npm registry access and write access to `/data/projects`
 (override with `NODE_RED_PROJECTS_DIR`). `--project <name>` chooses another project
 name; `--force` replaces an existing copy after preparation succeeds. It does not
 open the project or restart Node-RED.

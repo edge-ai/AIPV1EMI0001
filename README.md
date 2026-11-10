@@ -363,8 +363,10 @@ bash bin/install-nodered-project.sh --pipeline <pipeline-id>
 It writes `nodered-aipv1emi0001-dashboard` under `NODE_RED_PROJECTS_DIR`
 (default `/data/projects`) with the callback preselected for that pipeline,
 installs the dashboard's browser libraries from the lock file and commits the
-project to a local git repository. It refuses to replace an existing project
-unless `--force` is given, and preserves an existing project if preparation fails. It does
+project to a local git repository. It never replaces an existing project
+unless `--force` is given. With `--force`, it keeps the previous project until
+the new one is in place and restores it if a step fails, or prints where it is
+kept if it cannot. It needs `python3`, `jq`, `npm`, `git` and `tar`. It does
 not install Node-RED runtime nodes or switch the active project. Open the
 project, check the pipeline in the **AIPV1EMI0001 callback** node, and deploy. Open the dashboard at
 `https://<station>/ms5/aipv1emi0001_dash/` and assign `aipv1emi0001_dash` to
