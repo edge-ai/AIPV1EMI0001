@@ -1,0 +1,564 @@
+{
+  "utc": "2026-11-01T06:59:18.427482+00:00",
+  "dataset_name": "COCO 2017 validation",
+  "dataset_url": "https://cocodataset.org/#download",
+  "dataset": {
+    "annotations_sha256": "e8c7f7908f1d7278341fae127d0da654f102f11bd7b21d8aeefa635b8c810b6f",
+    "image_content_sha256": "bd62d5dd101d1d9d1192316240b4635409ef86f47007d3710dccdd22d3cb0e5e",
+    "image_count": 5000,
+    "total_dataset_images": 5000,
+    "selection": "all image IDs",
+    "non_crowd_ground_truth_by_class": {
+      "car": 1918,
+      "person": 10777,
+      "truck": 414
+    },
+    "category_ids": {
+      "car": 3,
+      "person": 1,
+      "truck": 8
+    }
+  },
+  "artifact_sha256": {
+    "raw_onnx": "1e3ab42aaa33c4f91a2c6f0bf2f1bb432d38f087480c8bf7761ff8a3fd168a1f",
+    "model_labels": "a94376a496c1b1fd2a46a3a7015ac3d72a4648a7a39a3e4b3169579a27363ad7",
+    "TensorRT FP32": "1f9f4d20eca0645e7149653d4724a7673cc1ea646ec1bbc5d0c5f5862f7ad724",
+    "TensorRT FP16": "61d6cce495c9f5dfcf2b3d74a587c254533f998b39a20ac9e014768c3e55435f",
+    "Deployment engine": "0c2df24311da9fc603c759c203d34cd0bf8de36d29f0f73bd3e278a6e16d115c",
+    "source_onnx": "5796e9e0836751e3b7a9623cc6db976ac7fd087fcfb2742d20d06dcf0a0b3560"
+  },
+  "evaluator_sha256": "f823cf76108942610e0e55559eb244843a21c452212724910aa4486b8dae1fb7",
+  "benchmark_helper_sha256": "6a5002d4cd26b05d17b2f75de94771f9450b4cd616adbfcd608ea85af3db93dc",
+  "versions": {
+    "python": "3.10.12",
+    "numpy": "2.2.6",
+    "opencv": "5.0.0",
+    "onnxruntime": "1.19.0",
+    "pycocotools": "2.0.10",
+    "trtexec": "8602",
+    "libnvinfer8": "8.6.2.3-1+cuda12.2",
+    "source": "importable Python module",
+    "tensorrt_python": "8.6.2"
+  },
+  "platform": {
+    "machine": "aarch64",
+    "l4t": "# R36 (release) REVISION: 3.0"
+  },
+  "onnxruntime_providers": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "run_conditions": {
+    "video_pipelines": "All registered pipelines were observed stopped before, periodically during, and after evaluation; the evaluation did not stop other station services."
+  },
+  "method": {
+    "input": "RGB, aspect-preserving top-left resize to 640x640, black padding, /255",
+    "raw_postprocess": "center-size boxes, score >= 0.001, top 4096 candidates, class-aware OpenCV NMS IoU 0.65, at most 100 per image",
+    "deployment": "actual TensorRT engine with embedded EfficientNMS; direct inference only",
+    "metrics": "COCO bbox AP at IoU 0.50:0.95 and 0.50; precision/recall at confidence >= 0.35 and IoU 0.50, following COCO crowd/ignore rules",
+    "batch_padding": "last partial batch is zero-padded; padded outputs are ignored",
+    "limitations": [
+      "Training dataset and checkpoint provenance are undocumented; evaluation-set overlap is unknown.",
+      "OpenCV preprocessing and NMS are not proven identical to DeepStream preprocessing or the plugin.",
+      "Direct engine evaluation does not exercise the DeepStream parser, tracking or callbacks.",
+      "A small ordered subset is a smoke test, not a representative accuracy estimate.",
+      "Engine hashes are recorded; the tool cannot prove how supplied engines were built."
+    ]
+  },
+  "results": [
+    {
+      "variant": "ONNX Runtime FP32",
+      "batch": 1,
+      "detection_count": 181108,
+      "metrics": {
+        "map_50_95": 0.1264336380139348,
+        "ap_50": 0.23276753152182217,
+        "classes": {
+          "car": {
+            "ap_50_95": 0.1913105382453018,
+            "ground_truth": 1918,
+            "true_positives": 800,
+            "false_positives": 1444,
+            "false_negatives": 1118,
+            "precision_at_035_iou_050": 0.35650623885918004,
+            "recall_at_035_iou_050": 0.4171011470281543
+          },
+          "person": {
+            "ap_50_95": 0.12851201504894824,
+            "ground_truth": 10777,
+            "true_positives": 2582,
+            "false_positives": 1313,
+            "false_negatives": 8195,
+            "precision_at_035_iou_050": 0.6629011553273427,
+            "recall_at_035_iou_050": 0.23958429989793079
+          },
+          "truck": {
+            "ap_50_95": 0.059478360747554346,
+            "ground_truth": 414,
+            "true_positives": 64,
+            "false_positives": 215,
+            "false_negatives": 350,
+            "precision_at_035_iou_050": 0.22939068100358423,
+            "recall_at_035_iou_050": 0.15458937198067632
+          }
+        }
+      }
+    },
+    {
+      "variant": "TensorRT FP32",
+      "batch": 1,
+      "detection_count": 181107,
+      "metrics": {
+        "map_50_95": 0.12643364993429212,
+        "ap_50": 0.23276756539889942,
+        "classes": {
+          "car": {
+            "ap_50_95": 0.1913105369886863,
+            "ground_truth": 1918,
+            "true_positives": 800,
+            "false_positives": 1444,
+            "false_negatives": 1118,
+            "precision_at_035_iou_050": 0.35650623885918004,
+            "recall_at_035_iou_050": 0.4171011470281543
+          },
+          "person": {
+            "ap_50_95": 0.128512121259807,
+            "ground_truth": 10777,
+            "true_positives": 2582,
+            "false_positives": 1313,
+            "false_negatives": 8195,
+            "precision_at_035_iou_050": 0.6629011553273427,
+            "recall_at_035_iou_050": 0.23958429989793079
+          },
+          "truck": {
+            "ap_50_95": 0.059478291554382993,
+            "ground_truth": 414,
+            "true_positives": 64,
+            "false_positives": 215,
+            "false_negatives": 350,
+            "precision_at_035_iou_050": 0.22939068100358423,
+            "recall_at_035_iou_050": 0.15458937198067632
+          }
+        }
+      }
+    },
+    {
+      "variant": "TensorRT FP16",
+      "batch": 1,
+      "detection_count": 181044,
+      "metrics": {
+        "map_50_95": 0.12639935605266228,
+        "ap_50": 0.2325715694858722,
+        "classes": {
+          "car": {
+            "ap_50_95": 0.19107199312117365,
+            "ground_truth": 1918,
+            "true_positives": 799,
+            "false_positives": 1444,
+            "false_negatives": 1119,
+            "precision_at_035_iou_050": 0.35621934908604547,
+            "recall_at_035_iou_050": 0.4165797705943691
+          },
+          "person": {
+            "ap_50_95": 0.12830320091554112,
+            "ground_truth": 10777,
+            "true_positives": 2583,
+            "false_positives": 1316,
+            "false_negatives": 8194,
+            "precision_at_035_iou_050": 0.6624775583482945,
+            "recall_at_035_iou_050": 0.2396770900992855
+          },
+          "truck": {
+            "ap_50_95": 0.059822874121272095,
+            "ground_truth": 414,
+            "true_positives": 63,
+            "false_positives": 217,
+            "false_negatives": 351,
+            "precision_at_035_iou_050": 0.225,
+            "recall_at_035_iou_050": 0.15217391304347827
+          }
+        }
+      }
+    },
+    {
+      "variant": "Deployment engine",
+      "batch": 1,
+      "detection_count": 7594,
+      "metrics": {
+        "map_50_95": null,
+        "ap_50": null,
+        "classes": {
+          "car": {
+            "ap_50_95": null,
+            "ground_truth": 1918,
+            "true_positives": 799,
+            "false_positives": 1442,
+            "false_negatives": 1119,
+            "precision_at_035_iou_050": 0.356537260151718,
+            "recall_at_035_iou_050": 0.4165797705943691
+          },
+          "person": {
+            "ap_50_95": null,
+            "ground_truth": 10777,
+            "true_positives": 2582,
+            "false_positives": 1314,
+            "false_negatives": 8195,
+            "precision_at_035_iou_050": 0.6627310061601642,
+            "recall_at_035_iou_050": 0.23958429989793079
+          },
+          "truck": {
+            "ap_50_95": null,
+            "ground_truth": 414,
+            "true_positives": 63,
+            "false_positives": 216,
+            "false_negatives": 351,
+            "precision_at_035_iou_050": 0.22580645161290322,
+            "recall_at_035_iou_050": 0.15217391304347827
+          }
+        }
+      }
+    },
+    {
+      "variant": "ONNX Runtime FP32",
+      "batch": 4,
+      "detection_count": 181108,
+      "metrics": {
+        "map_50_95": 0.1264336380139348,
+        "ap_50": 0.23276753152182217,
+        "classes": {
+          "car": {
+            "ap_50_95": 0.1913105382453018,
+            "ground_truth": 1918,
+            "true_positives": 800,
+            "false_positives": 1444,
+            "false_negatives": 1118,
+            "precision_at_035_iou_050": 0.35650623885918004,
+            "recall_at_035_iou_050": 0.4171011470281543
+          },
+          "person": {
+            "ap_50_95": 0.12851201504894824,
+            "ground_truth": 10777,
+            "true_positives": 2582,
+            "false_positives": 1313,
+            "false_negatives": 8195,
+            "precision_at_035_iou_050": 0.6629011553273427,
+            "recall_at_035_iou_050": 0.23958429989793079
+          },
+          "truck": {
+            "ap_50_95": 0.059478360747554346,
+            "ground_truth": 414,
+            "true_positives": 64,
+            "false_positives": 215,
+            "false_negatives": 350,
+            "precision_at_035_iou_050": 0.22939068100358423,
+            "recall_at_035_iou_050": 0.15458937198067632
+          }
+        }
+      }
+    },
+    {
+      "variant": "TensorRT FP32",
+      "batch": 4,
+      "detection_count": 181107,
+      "metrics": {
+        "map_50_95": 0.12643364993429212,
+        "ap_50": 0.23276756539889942,
+        "classes": {
+          "car": {
+            "ap_50_95": 0.1913105369886863,
+            "ground_truth": 1918,
+            "true_positives": 800,
+            "false_positives": 1444,
+            "false_negatives": 1118,
+            "precision_at_035_iou_050": 0.35650623885918004,
+            "recall_at_035_iou_050": 0.4171011470281543
+          },
+          "person": {
+            "ap_50_95": 0.128512121259807,
+            "ground_truth": 10777,
+            "true_positives": 2582,
+            "false_positives": 1313,
+            "false_negatives": 8195,
+            "precision_at_035_iou_050": 0.6629011553273427,
+            "recall_at_035_iou_050": 0.23958429989793079
+          },
+          "truck": {
+            "ap_50_95": 0.059478291554382993,
+            "ground_truth": 414,
+            "true_positives": 64,
+            "false_positives": 215,
+            "false_negatives": 350,
+            "precision_at_035_iou_050": 0.22939068100358423,
+            "recall_at_035_iou_050": 0.15458937198067632
+          }
+        }
+      }
+    },
+    {
+      "variant": "TensorRT FP16",
+      "batch": 4,
+      "detection_count": 181044,
+      "metrics": {
+        "map_50_95": 0.12639935605266228,
+        "ap_50": 0.2325715694858722,
+        "classes": {
+          "car": {
+            "ap_50_95": 0.19107199312117365,
+            "ground_truth": 1918,
+            "true_positives": 799,
+            "false_positives": 1444,
+            "false_negatives": 1119,
+            "precision_at_035_iou_050": 0.35621934908604547,
+            "recall_at_035_iou_050": 0.4165797705943691
+          },
+          "person": {
+            "ap_50_95": 0.12830320091554112,
+            "ground_truth": 10777,
+            "true_positives": 2583,
+            "false_positives": 1316,
+            "false_negatives": 8194,
+            "precision_at_035_iou_050": 0.6624775583482945,
+            "recall_at_035_iou_050": 0.2396770900992855
+          },
+          "truck": {
+            "ap_50_95": 0.059822874121272095,
+            "ground_truth": 414,
+            "true_positives": 63,
+            "false_positives": 217,
+            "false_negatives": 351,
+            "precision_at_035_iou_050": 0.225,
+            "recall_at_035_iou_050": 0.15217391304347827
+          }
+        }
+      }
+    },
+    {
+      "variant": "Deployment engine",
+      "batch": 4,
+      "detection_count": 7594,
+      "metrics": {
+        "map_50_95": null,
+        "ap_50": null,
+        "classes": {
+          "car": {
+            "ap_50_95": null,
+            "ground_truth": 1918,
+            "true_positives": 799,
+            "false_positives": 1442,
+            "false_negatives": 1119,
+            "precision_at_035_iou_050": 0.356537260151718,
+            "recall_at_035_iou_050": 0.4165797705943691
+          },
+          "person": {
+            "ap_50_95": null,
+            "ground_truth": 10777,
+            "true_positives": 2582,
+            "false_positives": 1314,
+            "false_negatives": 8195,
+            "precision_at_035_iou_050": 0.6627310061601642,
+            "recall_at_035_iou_050": 0.23958429989793079
+          },
+          "truck": {
+            "ap_50_95": null,
+            "ground_truth": 414,
+            "true_positives": 63,
+            "false_positives": 216,
+            "false_negatives": 351,
+            "precision_at_035_iou_050": 0.22580645161290322,
+            "recall_at_035_iou_050": 0.15217391304347827
+          }
+        }
+      }
+    },
+    {
+      "variant": "ONNX Runtime FP32",
+      "batch": 8,
+      "detection_count": 181109,
+      "metrics": {
+        "map_50_95": 0.12643298562876987,
+        "ap_50": 0.23276589795554983,
+        "classes": {
+          "car": {
+            "ap_50_95": 0.19130919152382195,
+            "ground_truth": 1918,
+            "true_positives": 800,
+            "false_positives": 1444,
+            "false_negatives": 1118,
+            "precision_at_035_iou_050": 0.35650623885918004,
+            "recall_at_035_iou_050": 0.4171011470281543
+          },
+          "person": {
+            "ap_50_95": 0.12851147280281403,
+            "ground_truth": 10777,
+            "true_positives": 2582,
+            "false_positives": 1313,
+            "false_negatives": 8195,
+            "precision_at_035_iou_050": 0.6629011553273427,
+            "recall_at_035_iou_050": 0.23958429989793079
+          },
+          "truck": {
+            "ap_50_95": 0.05947829255967357,
+            "ground_truth": 414,
+            "true_positives": 64,
+            "false_positives": 215,
+            "false_negatives": 350,
+            "precision_at_035_iou_050": 0.22939068100358423,
+            "recall_at_035_iou_050": 0.15458937198067632
+          }
+        }
+      }
+    },
+    {
+      "variant": "TensorRT FP32",
+      "batch": 8,
+      "detection_count": 181107,
+      "metrics": {
+        "map_50_95": 0.12643364993429212,
+        "ap_50": 0.23276756539889942,
+        "classes": {
+          "car": {
+            "ap_50_95": 0.1913105369886863,
+            "ground_truth": 1918,
+            "true_positives": 800,
+            "false_positives": 1444,
+            "false_negatives": 1118,
+            "precision_at_035_iou_050": 0.35650623885918004,
+            "recall_at_035_iou_050": 0.4171011470281543
+          },
+          "person": {
+            "ap_50_95": 0.128512121259807,
+            "ground_truth": 10777,
+            "true_positives": 2582,
+            "false_positives": 1313,
+            "false_negatives": 8195,
+            "precision_at_035_iou_050": 0.6629011553273427,
+            "recall_at_035_iou_050": 0.23958429989793079
+          },
+          "truck": {
+            "ap_50_95": 0.059478291554382993,
+            "ground_truth": 414,
+            "true_positives": 64,
+            "false_positives": 215,
+            "false_negatives": 350,
+            "precision_at_035_iou_050": 0.22939068100358423,
+            "recall_at_035_iou_050": 0.15458937198067632
+          }
+        }
+      }
+    },
+    {
+      "variant": "TensorRT FP16",
+      "batch": 8,
+      "detection_count": 181044,
+      "metrics": {
+        "map_50_95": 0.12639935605266228,
+        "ap_50": 0.2325715694858722,
+        "classes": {
+          "car": {
+            "ap_50_95": 0.19107199312117365,
+            "ground_truth": 1918,
+            "true_positives": 799,
+            "false_positives": 1444,
+            "false_negatives": 1119,
+            "precision_at_035_iou_050": 0.35621934908604547,
+            "recall_at_035_iou_050": 0.4165797705943691
+          },
+          "person": {
+            "ap_50_95": 0.12830320091554112,
+            "ground_truth": 10777,
+            "true_positives": 2583,
+            "false_positives": 1316,
+            "false_negatives": 8194,
+            "precision_at_035_iou_050": 0.6624775583482945,
+            "recall_at_035_iou_050": 0.2396770900992855
+          },
+          "truck": {
+            "ap_50_95": 0.059822874121272095,
+            "ground_truth": 414,
+            "true_positives": 63,
+            "false_positives": 217,
+            "false_negatives": 351,
+            "precision_at_035_iou_050": 0.225,
+            "recall_at_035_iou_050": 0.15217391304347827
+          }
+        }
+      }
+    },
+    {
+      "variant": "Deployment engine",
+      "batch": 8,
+      "detection_count": 7594,
+      "metrics": {
+        "map_50_95": null,
+        "ap_50": null,
+        "classes": {
+          "car": {
+            "ap_50_95": null,
+            "ground_truth": 1918,
+            "true_positives": 799,
+            "false_positives": 1442,
+            "false_negatives": 1119,
+            "precision_at_035_iou_050": 0.356537260151718,
+            "recall_at_035_iou_050": 0.4165797705943691
+          },
+          "person": {
+            "ap_50_95": null,
+            "ground_truth": 10777,
+            "true_positives": 2582,
+            "false_positives": 1314,
+            "false_negatives": 8195,
+            "precision_at_035_iou_050": 0.6627310061601642,
+            "recall_at_035_iou_050": 0.23958429989793079
+          },
+          "truck": {
+            "ap_50_95": null,
+            "ground_truth": 414,
+            "true_positives": 63,
+            "false_positives": 216,
+            "false_negatives": 351,
+            "precision_at_035_iou_050": 0.22580645161290322,
+            "recall_at_035_iou_050": 0.15217391304347827
+          }
+        }
+      }
+    }
+  ],
+  "fp16_parity_vs_trt_fp32": {
+    "1": {
+      "status": "pass",
+      "map_drop_percentage_points": 0.003429388162984326,
+      "recall_drop_percentage_points": {
+        "car": 0.05213764337851923,
+        "person": -0.009279020135471994,
+        "truck": 0.24154589371980506
+      },
+      "max_map_drop_percentage_points": 0.5,
+      "max_recall_drop_percentage_points": 1.0,
+      "meaning": "FP16 parity relative to TensorRT FP32, not an absolute accuracy guarantee"
+    },
+    "4": {
+      "status": "pass",
+      "map_drop_percentage_points": 0.003429388162984326,
+      "recall_drop_percentage_points": {
+        "car": 0.05213764337851923,
+        "person": -0.009279020135471994,
+        "truck": 0.24154589371980506
+      },
+      "max_map_drop_percentage_points": 0.5,
+      "max_recall_drop_percentage_points": 1.0,
+      "meaning": "FP16 parity relative to TensorRT FP32, not an absolute accuracy guarantee"
+    },
+    "8": {
+      "status": "pass",
+      "map_drop_percentage_points": 0.003429388162984326,
+      "recall_drop_percentage_points": {
+        "car": 0.05213764337851923,
+        "person": -0.009279020135471994,
+        "truck": 0.24154589371980506
+      },
+      "max_map_drop_percentage_points": 0.5,
+      "max_recall_drop_percentage_points": 1.0,
+      "meaning": "FP16 parity relative to TensorRT FP32, not an absolute accuracy guarantee"
+    }
+  }
+}

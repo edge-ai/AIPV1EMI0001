@@ -1,0 +1,44 @@
+name: Pull request checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Python test dependencies
+        run: python3 -m pip install -r tests/requirements-accuracy.txt
+
+      - name: Run Python tests
+        run: python3 -m unittest discover -s tests
+
+      - name: Install Node-RED test dependencies
+        run: |
+          npm ci --prefix logic --omit=dev --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org/
+          test ! -e logic/node_modules/node-red/package.json
+          npm ci --prefix tests/node-red-runtime --include=dev --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org/
+
+      - name: Run dashboard and Node-RED tests
+        run: node --test tests/*.test.cjs

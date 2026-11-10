@@ -198,3 +198,6 @@ select:focus-visible {
 @media (prefers-reduced-motion: reduce) {
     .pulse { animation: none; }
 }
+
+.playback-note { margin-top: 0.75rem; color: var(--muted); font-size: 0.85rem; line-height: 1.5; }
+.toolbar { flex-wrap: wrap; }
