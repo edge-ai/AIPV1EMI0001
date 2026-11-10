@@ -491,6 +491,58 @@ class InstallNodeRedProjectTests(unittest.TestCase):
         flows = json.loads((self.project / "flows.json").read_text())
         self.assertEqual([n["pipelineId"] for n in flows if n.get("id") == "aipv1emi0001callback"], ["P2"])
 
+    def fail_renames_from(self, source_glob):
+        """Make the installer's rename(2) helper fail for sources matching a bash glob."""
+        stub = self.station.bin / "python3"
+        stub.write_text(textwrap.dedent(f"""\
+            #!/bin/bash
+            if [[ $# -eq 4 && $1 == -c && $3 == {source_glob} ]]; then
+                echo "ERROR: injected rename failure" >&2
+                exit 9
+            fi
+            exec "{sys.executable}" "$@"
+        """))
+        stub.chmod(0o755)
+
+    def test_never_replaces_a_project_created_during_installation(self):
+        npm = self.station.bin / "npm"
+        stub = npm.read_text()
+        for kind, create in (("directory", 'mkdir -p "$TARGET" && echo theirs > "$TARGET/flows.json"'),
+                             ("file", 'echo theirs > "$TARGET"')):
+            with self.subTest(kind=kind):
+                npm.write_text(f"{stub}\nTARGET={self.project}\n{create}\n")
+                result = self.install("--pipeline", "P1")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("created during installation: pass --force", result.stderr)
+                theirs = self.project / "flows.json" if kind == "directory" else self.project
+                self.assertEqual(theirs.read_text(), "theirs\n")
+                self.assertEqual([path.name for path in self.projects.iterdir()], [self.project.name])
+                if kind == "directory":
+                    shutil.rmtree(self.project)
+                else:
+                    self.project.unlink()
+
+    def test_failed_forced_move_restores_the_previous_project(self):
+        self.assertEqual(self.install("--pipeline", "P1").returncode, 0)
+        original = (self.project / "flows.json").read_bytes()
+        self.fail_renames_from("*/.nodered-aipv1emi0001-dashboard.??????")
+        result = self.install("--pipeline", "P2", "--force")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Restored the previous project", result.stderr)
+        self.assertEqual((self.project / "flows.json").read_bytes(), original)
+        self.assertEqual(list(self.projects.iterdir()), [self.project])
+
+    def test_keeps_the_previous_project_when_it_cannot_be_restored(self):
+        self.assertEqual(self.install("--pipeline", "P1").returncode, 0)
+        original = (self.project / "flows.json").read_bytes()
+        self.fail_renames_from("*/.nodered-aipv1emi0001-dashboard.*")
+        result = self.install("--pipeline", "P2", "--force")
+        self.assertNotEqual(result.returncode, 0)
+        (kept,) = self.projects.glob(".nodered-aipv1emi0001-dashboard.previous.*/" + self.project.name)
+        self.assertIn(f"the previous project is kept in {kept}", result.stderr)
+        self.assertEqual((kept / "flows.json").read_bytes(), original)
+        self.assertEqual([path.name for path in self.projects.iterdir()], [kept.parent.name])
+
     def test_validates_arguments_before_writing(self):
         for args, message in ((("--project", "x"), "--pipeline is required"),
                               (("--pipeline", "P1", "--project", "../escape"), "invalid project name"),
