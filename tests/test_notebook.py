@@ -1,4 +1,3 @@
-import base64
 import json
 import os
 import re
@@ -163,6 +162,7 @@ class NotebookStructureTests(unittest.TestCase):
                         'curl -fsS -X POST "$MS3/aiprocessor/scan/$AIP_ID?force=false"',
                         "eais-tools pipeline test", "eais-tools pipeline clean",
                         "python3 tools/check_package.py", "python3 tools/benchmark.py run",
+                        'bin/install-nodered-project.sh --pipeline "$PIPELINE_ID"',
                         "validate_specified_triton_config", "validate_ds_config"):
             self.assertIn(command, source)
         self.assertNotIn("eais-tools aip scan", source)
@@ -171,7 +171,7 @@ class NotebookStructureTests(unittest.TestCase):
             self.assertNotIn(removed, source)
 
     def test_markdown_explains_the_pipeline_with_diagrams(self):
-        self.assertGreaterEqual(MARKDOWN.count("```mermaid"), 3)
+        self.assertGreaterEqual(MARKDOWN.count("```mermaid"), 1)
         for topic in ("nvinferserver", "NvDCF", "nvtracker", "callback.py", ".include"):
             self.assertIn(topic, MARKDOWN)
 
@@ -416,39 +416,107 @@ class NotebookBehaviourTests(unittest.TestCase):
                 finally:
                     os.chdir(cwd)
 
-    def test_nodered_project_is_wired_without_credentials_or_dependencies(self):
+    def test_nodered_cell_delegates_to_the_install_script(self):
         with tempfile.TemporaryDirectory() as directory:
             station = Station(directory)
-            ignore = shutil.ignore_patterns("node_modules", "flows_cred.json")
             for folder in ("logic", "dashboard"):
-                shutil.copytree(ROOT / folder, station.root / folder, ignore=ignore)
-            (station.root / "logic/flows_cred.json").write_text('{"secret": "x"}')
-            (station.root / "dashboard/node_modules/local").mkdir(parents=True)
-            result = station.run("nodered", PIPELINE_ID="P1")
+                shutil.copytree(ROOT / folder, station.root / folder,
+                                ignore=shutil.ignore_patterns("node_modules", "flows_cred.json"))
+            (station.root / "bin").mkdir()
+            shutil.copy2(ROOT / "bin/install-nodered-project.sh", station.root / "bin")
+            projects = Path(directory) / "projects"
+            result = station.run("nodered", PIPELINE_ID="P1", NODE_RED_PROJECTS_DIR=str(projects))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            project = Path(directory) / "projects/nodered-aipv1emi0001-dashboard"
-            flows = json.loads((project / "flows.json").read_text())
+            flows = json.loads((projects / "nodered-aipv1emi0001-dashboard/flows.json").read_text())
             (callback,) = [n for n in flows if n.get("id") == "aipv1emi0001callback"]
             self.assertEqual(callback["pipelineId"], "P1")
-            package = json.loads((project / "package.json").read_text())
-            self.assertEqual(package["dependencies"]["@edgematrix/node-red-contrib-eais"], "0.7.10")
-            self.assertNotIn("@edge-ai/node-red-contrib-eais", package["dependencies"])
-            self.assertFalse((project / "node_modules").exists())
-            self.assertFalse((project / "flows_cred.json").exists())
-            self.assertFalse((project / "uibuilder/node_modules/local").exists())
-            tracked = subprocess.run(["git", "-C", str(project), "ls-files"], capture_output=True,
-                                     text=True, check=True).stdout.split()
-            self.assertIn("uibuilder/aipv1emi0001_dash/src/index.js", tracked)
-            self.assertFalse([name for name in tracked if "node_modules" in name or "cred" in name])
-            self.assertNotEqual(station.run("nodered", PIPELINE_ID="P1").returncode, 0, "must not overwrite")
-
-    def test_nodered_project_requires_a_pipeline_before_writing(self):
-        with tempfile.TemporaryDirectory() as directory:
-            station = Station(directory)
-            result = station.run("nodered", PIPELINE_ID="")
+            result = station.run("nodered", PIPELINE_ID="", NODE_RED_PROJECTS_DIR=str(projects))
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Run the pipeline check first", result.stderr)
-            self.assertFalse((Path(directory) / "projects").exists())
+
+
+class InstallNodeRedProjectTests(unittest.TestCase):
+    SCRIPT = "bin/install-nodered-project.sh"
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.station = Station(self.directory.name)
+        self.aip = self.station.root
+        for folder in ("logic", "dashboard"):
+            shutil.copytree(ROOT / folder, self.aip / folder,
+                            ignore=shutil.ignore_patterns("node_modules", "flows_cred.json"))
+        (self.aip / "bin").mkdir()
+        shutil.copy2(ROOT / self.SCRIPT, self.aip / self.SCRIPT)
+        self.projects = Path(self.directory.name) / "projects"
+        self.project = self.projects / "nodered-aipv1emi0001-dashboard"
+
+    def install(self, *args, cwd=None, **env):
+        environment = {**os.environ, "PATH": f"{self.station.bin}:{os.environ['PATH']}",
+                       "CALLS": str(self.station.calls), "NODE_RED_PROJECTS_DIR": str(self.projects),
+                       "COPYFILE_DISABLE": "1", **env}
+        return subprocess.run([str(self.aip / self.SCRIPT), *args], cwd=cwd or self.directory.name,
+                              env=environment, capture_output=True, text=True)
+
+    def test_installs_a_wired_project_without_credentials_or_dependencies(self):
+        (self.aip / "logic/flows_cred.json").write_text('{"secret": "x"}')
+        (self.aip / "dashboard/node_modules/local").mkdir(parents=True)
+        result = self.install("--pipeline", "P1")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Projects > Open > nodered-aipv1emi0001-dashboard", result.stdout)
+        flows = json.loads((self.project / "flows.json").read_text())
+        (callback,) = [n for n in flows if n.get("id") == "aipv1emi0001callback"]
+        self.assertEqual(callback["pipelineId"], "P1")
+        package = json.loads((self.project / "package.json").read_text())
+        self.assertEqual(package["dependencies"]["@edgematrix/node-red-contrib-eais"], "0.7.10")
+        self.assertNotIn("@edge-ai/node-red-contrib-eais", package["dependencies"])
+        self.assertFalse((self.project / "node_modules").exists())
+        self.assertFalse((self.project / "flows_cred.json").exists())
+        self.assertFalse((self.project / "uibuilder/node_modules/local").exists())
+        self.assertFalse((self.project / "uibuilder/README.md").exists())
+        self.assertIn("npm ci --omit=dev --ignore-scripts --no-audit --no-fund", self.station.log())
+        tracked = subprocess.run(["git", "-C", str(self.project), "ls-files"], capture_output=True,
+                                 text=True, check=True).stdout.split()
+        self.assertIn("uibuilder/aipv1emi0001_dash/src/index.js", tracked)
+        self.assertFalse([name for name in tracked if "node_modules" in name or "cred" in name])
+        self.assertEqual(sorted(path.name for path in self.projects.iterdir()), [self.project.name])
+
+    def test_refuses_to_overwrite_unless_forced(self):
+        self.assertEqual(self.install("--pipeline", "P1").returncode, 0)
+        result = self.install("--pipeline", "P2")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("pass --force", result.stderr)
+        result = self.install("--pipeline", "P2", "--force")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        flows = json.loads((self.project / "flows.json").read_text())
+        self.assertEqual([n["pipelineId"] for n in flows if n.get("id") == "aipv1emi0001callback"], ["P2"])
+
+    def test_validates_arguments_before_writing(self):
+        for args, message in ((("--project", "x"), "--pipeline is required"),
+                              (("--pipeline", "P1", "--project", "../escape"), "invalid project name"),
+                              (("--pipeline",), "--pipeline needs a value"),
+                              (("--bogus",), "unknown option")):
+            with self.subTest(args=args):
+                result = self.install(*args)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+        self.assertFalse(self.projects.exists())
+        self.assertEqual(self.install("--help").returncode, 0)
+
+    def test_failed_install_leaves_no_partial_project(self):
+        (self.station.bin / "npm").write_text("#!/bin/bash\nexit 9\n")
+        result = self.install("--pipeline", "P1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(list(self.projects.iterdir()), [])
+
+    def test_runs_from_any_directory_and_custom_project_name(self):
+        result = self.install("--pipeline", "P1", "--project", "my-dashboard", cwd="/")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.projects / "my-dashboard/flows.json").is_file())
+
+    def test_script_ships_in_the_package(self):
+        self.assertIn(self.SCRIPT, check_package.include_entries(ROOT))
+        self.assertTrue(os.access(ROOT / self.SCRIPT, os.X_OK))
 
 
 class AccuracyNotebookTests(unittest.TestCase):
@@ -561,37 +629,40 @@ class AccuracyNotebookTests(unittest.TestCase):
 
 
 class PresentationTests(unittest.TestCase):
-    def test_cached_manifest_version_matches_current_manifest(self):
-        notebook = json.loads((ROOT / "presentation.ipynb").read_text())
-        cell = next(cell for cell in notebook["cells"] if cell["id"] == "manifest")
-        output = "".join("".join(item.get("text", [])) for item in cell["outputs"])
-        self.assertIn(f"{'version':22} {AIP_VERSION}\n", output)
+    def test_presentation_has_no_code(self):
+        self.assertEqual([name for name, (kind, _) in PRESENTATION.items() if kind != "markdown"], [])
+        self.assertIn("There is no code to run here", PRESENTATION["title"][1])
 
-    def test_code_compiles_and_live_demo_is_opt_in(self):
-        for name, (kind, source) in PRESENTATION.items():
-            if kind == "code":
-                with self.subTest(cell=name):
-                    compile(source, name, "exec")
-        self.assertIn("LIVE = False", PRESENTATION["live"][1])
+    def test_manifest_summary_matches_current_manifest(self):
+        manifest = json.loads((ROOT / "manifest.json").read_text())
+        detector, tracker = manifest["primary_processor"], manifest["tracker_engine"]
+        summary = PRESENTATION["manifest"][1]
+        self.assertIn(f"`{manifest['unique_id']}` version **{AIP_VERSION}**", summary)
+        self.assertIn(f"| Hardware targets | {', '.join(manifest['hardware_target'])} |", summary)
+        self.assertIn(f"up to {manifest['maximum_input_streams']}", summary)
+        classes = ", ".join(f"`{name}`" for name in detector["classes"])
+        self.assertIn(f"{detector['model']}, classes {classes}, batch {detector['batch_size']}", summary)
+        self.assertIn(f"{tracker['name']}, {tracker['tracker_width']}×{tracker['tracker_height']}", summary)
 
     def test_uses_published_results_and_diagrams(self):
         text = "\n".join(source for _, source in PRESENTATION.values())
         self.assertIn("doc/benchmarks/orin-nx-16gb-jp6.0.json", text)
-        self.assertGreaterEqual(text.count("```mermaid"), 4)
+        self.assertGreaterEqual(text.count("```mermaid"), 5)
 
-    def test_cached_results_and_chart_match_published_benchmark(self):
+    def test_results_table_and_chart_match_published_benchmark(self):
         report = json.loads((ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0.json").read_text())
-        notebook = json.loads((ROOT / "presentation.ipynb").read_text())
-        cells = {cell["id"]: cell for cell in notebook["cells"]}
-        output = "".join("".join(item.get("text", [])) for item in cells["results-load"]["outputs"])
-        for row in report["results"]:
-            self.assertIn(f"{row['median_ms']:.1f} ms", output, row["variant"])
+        table = PRESENTATION["results-table"][1]
+        rows = {(row["variant"], row["batch"]): row for row in report["results"]}
+        for variant in dict.fromkeys(row["variant"] for row in report["results"]):
+            cells = " | ".join(f"{rows[variant, b]['median_ms']:.1f} ms "
+                               f"({rows[variant, b]['speedup_vs_onnxruntime']:.2f}×)" for b in (1, 4, 8))
+            self.assertIn(f"| {variant} | {cells} |", table)
         providers = report["onnxruntime_node_placement"]["providers"]
         self.assertIn(f"{providers['CUDAExecutionProvider']['node_count']} CUDA, "
-                      f"{providers['CPUExecutionProvider']['node_count']} CPU", output)
-        (chart,) = [item["data"]["image/png"] for item in cells["results-chart"]["outputs"]
-                    if "image/png" in item.get("data", {})]
-        self.assertEqual(base64.b64decode(chart), (ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0.png").read_bytes())
+                      f"{providers['CPUExecutionProvider']['node_count']} CPU", table)
+        (image,) = re.findall(r"!\[[^\]]+\]\(([^)]+)\)", table)
+        self.assertEqual(image, "doc/benchmarks/orin-nx-16gb-jp6.0.png")
+        self.assertTrue((ROOT / image).is_file())
 
     def test_teaching_material_qualifies_portability_and_performance_claims(self):
         presentation = " ".join(" ".join(source.split()) for _, source in PRESENTATION.values())
@@ -618,11 +689,11 @@ class PresentationTests(unittest.TestCase):
     def test_teaching_material_explains_optimize_measure_validate(self):
         guide = " ".join(MARKDOWN.split())
         presentation = " ".join(" ".join(source.split()) for _, source in PRESENTATION.values())
-        self.assertIn("How this AIP is optimized, measured and validated", guide)
-        self.assertIn("| What is optimized | Why | How it is measured | How it is validated |", guide)
-        self.assertIn("What it does not prove", guide)
-        self.assertIn("**Raw model latency**", guide)
-        self.assertIn("**Pipeline throughput**", guide)
+        self.assertIn("What this notebook proves", guide)
+        self.assertIn("does **not** prove detection accuracy", guide)
+        self.assertIn("Every optimization is a claim", presentation)
+        self.assertIn("**Raw model latency**", presentation)
+        self.assertIn("**Pipeline throughput**", presentation)
         self.assertIn("| Check | Section | Proves | Does not prove |", guide)
         self.assertIn("results.json", guide)
         self.assertIn("ONNX Runtime may use CPU nodes even when CUDA is requested", guide)

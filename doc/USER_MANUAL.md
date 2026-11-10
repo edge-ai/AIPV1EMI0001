@@ -38,24 +38,23 @@ UIBuilder application in `dashboard/`. The dashboard shows:
 - ROI and line-crossing counts when those analytics are configured.
 
 To activate the dashboard, follow these steps. Step 8 of
-[`localdev.ipynb`](../localdev.ipynb) prepares the project and preselects its
-test pipeline, but does not install Node-RED runtime nodes:
+[`localdev.ipynb`](../localdev.ipynb) runs step 2 for its test pipeline:
 
 1. Make sure the Node-RED runtime loads `@edgematrix/node-red-contrib-eais`
    0.7.10 and UIBuilder. Do not install the legacy
    `@edge-ai/node-red-contrib-eais` alongside it: both register the same node
    types. Have the station administrator arrange the migration and any restart;
    see [`logic/README.md`](../logic/README.md).
-2. Copy the bundled `logic/` directory to a new Node-RED project
-   (`/data/projects/<name>/` on the station) and make it a git repository.
-3. Copy the bundled `dashboard/` contents to that project's `uibuilder/`
-   directory.
-4. Run `npm ci --omit=dev` in the project's `uibuilder/` directory. This installs
-   browser libraries, not the Node-RED runtime nodes.
-5. In the Node-RED editor, open the project (☰ → **Projects** → **Open**).
-   Open **AIPV1EMI0001 callback**, select the pipeline running this AIP, and
-   deploy. The notebook preselects its test pipeline.
-6. Open `https://<station>/ms5/aipv1emi0001_dash/` and assign
+2. From the extracted AIP package, inside the Node-RED container, run
+   `bash bin/install-nodered-project.sh --pipeline <pipeline-id>`. It creates
+   the project `nodered-aipv1emi0001-dashboard` under `/data/projects/`
+   (override with `NODE_RED_PROJECTS_DIR`), installs the dashboard's browser
+   libraries and makes the project a git repository. Add `--force` to replace
+   an existing copy. It does not install Node-RED runtime nodes.
+3. In the Node-RED editor, open the project (☰ → **Projects** → **Open**).
+   Check that **AIPV1EMI0001 callback** selects the pipeline running this AIP,
+   and deploy.
+4. Open `https://<station>/ms5/aipv1emi0001_dash/` and assign
    `aipv1emi0001_dash` to the required users in Accounts management.
 
 No CDN is used. Vue and `hls.js` are installed from the bundled lock file and

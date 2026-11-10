@@ -27,9 +27,10 @@ Tracking is handled by the NVIDIA NvDCF multi-object tracker. The AIP supports t
 | `models/AIPV1EMI0001_Yolo_Detector/` | Triton model repository: `config.pbtxt`, labels. Model weights are **not** stored here — they are downloaded from Hugging Face (see below) |
 | `src/nvdsinfer_customparser/` | Custom bounding-box parser plugin (`libnvds_infercustomparser.so`) for `nvinfer` |
 | `bin/build.sh` | Builds the custom parser plugin and the TensorRT engine with `trtexec` |
+| `bin/install-nodered-project.sh` | Installs `logic/` and `dashboard/` as a ready Node-RED project for a given pipeline |
 | `localdev.ipynb` | Step-by-step build notebook: download weights → build → optional benchmark → validate → package → scan → pipeline test → dashboard |
 | `accuracy.ipynb` | Labelled detection evaluation: compare FP32/FP16 and the deployment engine on COCO-format data |
-| `presentation.ipynb` | Talk companion: AI Processor concepts, pipeline diagrams and benchmark results |
+| `presentation.ipynb` | Code-free talk companion: how this AI Processor is designed, optimized, measured and validated |
 | `tools/` | Notebook and CI helpers: package checks, inference latency benchmarks and labelled accuracy evaluation |
 | `doc/` | User manual and integration notes |
 | `doc/benchmarks/` | Reference benchmark results (JSON) and chart |
@@ -313,9 +314,9 @@ artifact without publishing a release.
 [`presentation.ipynb`](presentation.ipynb) is the companion to the talk *From Model to Field:
 Engineering Reliable Edge AI Applications on Embedded GPUs*. It explains the AI Processor
 contract, the GPU pipeline, the ONNX-to-TensorRT path, fair measurement, reproducible
-packaging and layered validation, with diagrams and the benchmark chart above. Its live cells
-are disabled by default. The separate [`accuracy.ipynb`](accuracy.ipynb) provides the
-hands-on labelled evaluation.
+packaging and layered validation, with diagrams, the published benchmark table and chart.
+It contains no code: the hands-on steps live in [`localdev.ipynb`](localdev.ipynb), and
+[`accuracy.ipynb`](accuracy.ipynb) provides the labelled evaluation.
 
 ## Integrated Node-RED dashboard
 
@@ -335,13 +336,20 @@ Some stations instead have the legacy
 because they register the same node types. Arrange any migration and restart
 with the station administrator; see [`logic/README.md`](logic/README.md).
 
-Step 8 of [`localdev.ipynb`](localdev.ipynb) prepares the project
-`nodered-aipv1emi0001-dashboard`, preselecting its test pipeline. It installs
-the dashboard's browser dependencies, not the Node-RED runtime nodes. To
-install it by hand, copy `logic/` to a new Node-RED project, copy the contents
-of `dashboard/` into that project's `uibuilder/` directory and run
-`npm ci --omit=dev` there. Open the project, select the pipeline in the
-**AIPV1EMI0001 callback** node, and deploy. Open the dashboard at
+Install the project with [`bin/install-nodered-project.sh`](bin/install-nodered-project.sh),
+which step 8 of [`localdev.ipynb`](localdev.ipynb) also runs:
+
+```bash
+bash bin/install-nodered-project.sh --pipeline <pipeline-id>
+```
+
+It writes `nodered-aipv1emi0001-dashboard` under `NODE_RED_PROJECTS_DIR`
+(default `/data/projects`) with the callback preselected for that pipeline,
+installs the dashboard's browser libraries from the lock file and commits the
+project to a local git repository. It refuses to replace an existing project
+unless `--force` is given, and leaves nothing behind if a step fails. It does
+not install Node-RED runtime nodes or switch the active project. Open the
+project, check the pipeline in the **AIPV1EMI0001 callback** node, and deploy. Open the dashboard at
 `https://<station>/ms5/aipv1emi0001_dash/` and assign `aipv1emi0001_dash` to
 users from Accounts management.
 
