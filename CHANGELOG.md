@@ -1,6 +1,6 @@
 # Changelog
 
-## v6.1.0 - Unreleased
+## v6.1.0 - 2026-11-10
 
 - docs: Rewrite `localdev.ipynb` as a command-first build guide based on `eais-tools`, with a build sequence diagram; keep architecture explanations in the presentation
 - fix: Distinguish missing callback frames from zero detections and aggregate only reported analytics values
