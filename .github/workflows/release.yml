@@ -1,6 +1,6 @@
 ##################################################################################################
 #
-# Pipeline to create a package for the AIPV1EMI0001 AiProcessor (YOLOv7-tiny detector)
+# Pipeline to create a package for the AIPV1EMI0001 AiProcessor (active YOLO flavor, see tools/flavors.py)
 #
 ###################################################################################################
 
@@ -62,13 +62,24 @@ jobs:
       - name: Check dashboard integration
         run: node --test tests/*.test.cjs
 
-      - name: Download model weights from Hugging Face
+      # TensorRT engines are tied to the JetPack and TensorRT version, so they are built on a
+      # Jetson with bin/build.sh (see the notebooks) and published once. The download location and
+      # checksum of the active flavor live in flavors/<id>/flavor.json (engine_asset).
+      - name: Download the TensorRT engine of the active flavor
         run: |
-          HF_BASE="https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/2f7dbaf4fa12b301e90f2e83c8e417ea34ead4cc"
+          python3 tools/flavors.py check
+          FLAVOR=$(python3 tools/flavors.py active)
+          ENGINE=$(python3 tools/flavors.py get "$FLAVOR" engine)
+          URL=$(python3 tools/flavors.py get "$FLAVOR" engine_asset.url)
+          SHA256=$(python3 tools/flavors.py get "$FLAVOR" engine_asset.sha256)
+          if [ "$URL" = "null" ] || [ "$SHA256" = "null" ]; then
+            echo "::error::flavors/$FLAVOR/flavor.json has no engine_asset. Build $ENGINE on a Jetson (bin/build.sh $FLAVOR), publish it, then set engine_asset.url and engine_asset.sha256."
+            exit 1
+          fi
           MODEL_DIR="models/AIPV1EMI0001_Yolo_Detector"
           mkdir -p "$MODEL_DIR/1"
-          curl -fL "$HF_BASE/yolov7-fp16-1x8x8-jp6-l4t36.3-arm64.engine" -o "$MODEL_DIR/1/yolov7-fp16-1x8x8.engine"
-          echo "670150b495a0f120d178fbbb1e3f29758ccbee710e4477bf6847f46517a873b8  $MODEL_DIR/1/yolov7-fp16-1x8x8.engine" | sha256sum -c -
+          curl -fL "$URL" -o "$MODEL_DIR/1/$ENGINE"
+          echo "$SHA256  $MODEL_DIR/1/$ENGINE" | sha256sum -c -
 
       - name: Build ARM64 custom parser
         run: |
@@ -132,10 +143,12 @@ jobs:
       - name: Validate distribution contents
         run: |
           set -e
-          ENGINE="dist/models/AIPV1EMI0001_Yolo_Detector/1/yolov7-fp16-1x8x8.engine"
+          FLAVOR=$(python3 tools/flavors.py active)
+          ENGINE="dist/models/AIPV1EMI0001_Yolo_Detector/1/$(python3 tools/flavors.py get "$FLAVOR" engine)"
+          INFER_CONFIG="dist/configs/$(python3 tools/flavors.py get "$FLAVOR" infer_config)"
           PARSER="dist/models/AIPV1EMI0001_Yolo_Detector/libnvds_infercustomparser.so"
           for f in "$ENGINE" "$PARSER" dist/manifest.json dist/callback.py dist/LICENSE dist/LICENSE.weights \
-            dist/configs/config_infer_primary_detector_yolov7.txt \
+            "$INFER_CONFIG" \
             dist/configs/config_tracker_NvDCF_perf.yml \
             dist/logic/flows.json dist/logic/package.json \
             dist/dashboard/package.json \

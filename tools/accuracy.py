@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Evaluate the raw model and deployment engine against COCO-format labels.
+"""Evaluate a detector flavor against COCO-format labels.
 
-The raw ONNX and TensorRT engines use the same low-threshold postprocessing for
-an mAP comparison. The deployment engine has an embedded 0.35 score threshold,
-so only its operating-point precision and recall are reported.
+The models are COCO-pretrained, so they predict the 80 COCO classes. mAP 50:95 is
+computed over every COCO class present in the dataset, which is the figure Ultralytics
+publishes for COCO val2017, and again over the three classes this AI Processor keeps
+(car, person, truck). Precision and recall at the 0.35 operating point are reported for
+those three classes.
+
+The raw ONNX and TensorRT engines use the same low-threshold postprocessing for an
+mAP comparison. A YOLOv7 deployment engine has an embedded 0.35 score threshold, so
+only its operating-point precision and recall are reported.
 """
 import argparse
 import contextlib
@@ -26,6 +32,7 @@ from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
 import benchmark
+import flavors
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,8 +45,21 @@ INPUT_SIZE = 640
 SCORE_FLOOR = 0.001
 OPERATING_SCORE = 0.35
 NMS_IOU = 0.65
-MAX_CANDIDATES = 4096
+CLASS_CANDIDATES = 1000
 MAX_DETECTIONS = 100
+COCO_NAMES = (
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+    "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
+    "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
+    "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
+    "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle",
+    "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
+    "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant",
+    "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
+    "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
+    "teddy bear", "hair drier", "toothbrush",
+)
+assert len(COCO_NAMES) == flavors.COCO_CLASSES
 
 
 @lru_cache(maxsize=1)
@@ -61,13 +81,16 @@ def select_dataset(annotations, images_dir, limit):
     coco = quiet_coco(annotations)
     if limit < 0:
         raise ValueError("--limit must be zero (all images) or a positive number")
-    names = class_names()
     category_ids = {}
-    for name in names:
+    for name in COCO_NAMES:
         matches = [cat["id"] for cat in coco.cats.values() if cat["name"] == name]
-        if len(matches) != 1:
-            raise ValueError(f"Dataset must contain exactly one '{name}' category: {matches}")
-        category_ids[name] = matches[0]
+        if len(matches) > 1:
+            raise ValueError(f"Dataset must contain at most one '{name}' category: {matches}")
+        if matches:
+            category_ids[name] = matches[0]
+    missing = [name for name in class_names() if name not in category_ids]
+    if missing:
+        raise ValueError(f"Dataset must contain exactly one category for each of: {', '.join(missing)}")
     ids = sorted(coco.imgs)
     if not ids:
         raise ValueError("The dataset has no images")
@@ -94,6 +117,7 @@ def select_dataset(annotations, images_dir, limit):
         "total_dataset_images": len(coco.imgs),
         "selection": "first image IDs in ascending order" if limit else "all image IDs",
         "non_crowd_ground_truth_by_class": counts,
+        "evaluated_classes": len(category_ids),
         "category_ids": category_ids,
     }
 
@@ -138,48 +162,68 @@ def original_box(corners, transform):
     return [float(x1), float(y1), float(x2 - x1), float(y2 - y1)]
 
 
+def finish(detections, image_id, transform, category_ids, limit=MAX_DETECTIONS):
+    """Map (x1, y1, x2, y2, score, class) rows to COCO predictions in the original image."""
+    detections.sort(key=lambda row: -row[4])
+    selected = []
+    for x1, y1, x2, y2, score, class_index in detections[:limit]:
+        category = category_ids.get(COCO_NAMES[class_index])
+        original = original_box([x1, y1, x2, y2], transform) if category is not None else None
+        if original is not None:
+            selected.append({"image_id": image_id, "category_id": category,
+                             "bbox": original, "score": float(score)})
+    return selected
+
+
 def raw_detections(boxes, scores, image_id, transform, category_ids):
-    names = class_names()
-    if boxes.shape != (benchmark.CANDIDATES, 4) or scores.shape != (benchmark.CANDIDATES, len(names)):
+    """YOLOv7 raw outputs: centre-size boxes with one score per COCO class, class-aware NMS."""
+    spec = flavors.RAW_OUTPUTS["efficientnms"]
+    if boxes.shape != spec["raw_boxes"] or scores.shape != spec["raw_scores"]:
         raise ValueError(f"Unexpected raw outputs: {boxes.shape}, {scores.shape}")
     if not np.isfinite(boxes).all() or not np.isfinite(scores).all():
         raise ValueError("Raw inference returned non-finite boxes or scores")
     if (scores < 0).any() or (scores > 1).any():
         raise ValueError("Raw model scores must be probabilities between zero and one")
-    anchors, classes = np.where(scores >= SCORE_FLOOR)
-    values = scores[anchors, classes]
-    order = np.argsort(-values, kind="stable")[:MAX_CANDIDATES]
-    anchors, classes, values = anchors[order], classes[order], values[order]
-    selected = []
-    for class_index, name in enumerate(names):
-        positions = np.flatnonzero(classes == class_index)
-        if not len(positions):
+    detections = []
+    for class_index, name in enumerate(COCO_NAMES):
+        if name not in category_ids:
             continue
-        centers = boxes[anchors[positions]]
+        class_scores = scores[:, class_index]
+        anchors = np.flatnonzero(class_scores >= SCORE_FLOOR)
+        anchors = anchors[np.argsort(-class_scores[anchors], kind="stable")][:CLASS_CANDIDATES]
+        centers = boxes[anchors]
         xywh = np.column_stack((centers[:, 0] - centers[:, 2] / 2,
                                 centers[:, 1] - centers[:, 3] / 2,
                                 centers[:, 2], centers[:, 3]))
         valid = (xywh[:, 2] > 0) & (xywh[:, 3] > 0)
-        positions, xywh = positions[valid], xywh[valid]
-        if not len(positions):
+        anchors, xywh = anchors[valid], xywh[valid]
+        if not len(anchors):
             continue
-        indices = cv2.dnn.NMSBoxes(xywh.tolist(), values[positions].tolist(),
-                                   SCORE_FLOOR - 1e-8, NMS_IOU)
+        values = class_scores[anchors]
+        indices = cv2.dnn.NMSBoxes(xywh.tolist(), values.tolist(), SCORE_FLOOR - 1e-8, NMS_IOU)
         for index in np.asarray(indices).reshape(-1):
-            position, box = positions[int(index)], xywh[int(index)]
-            corners = [box[0], box[1], box[0] + box[2], box[1] + box[3]]
-            original = original_box(corners, transform)
-            if original is not None:
-                selected.append({
-                    "image_id": image_id, "category_id": category_ids[name],
-                    "bbox": original, "score": float(values[position]),
-                })
-    selected.sort(key=lambda prediction: -prediction["score"])
-    return selected[:MAX_DETECTIONS]
+            x, y, width, height = xywh[int(index)]
+            detections.append((x, y, x + width, y + height, values[int(index)], class_index))
+    return finish(detections, image_id, transform, category_ids)
+
+
+def end2end_detections(rows, image_id, transform, category_ids):
+    """YOLOv10 / YOLO26 outputs: 300 NMS-free rows of x1, y1, x2, y2, score, class."""
+    if rows.shape != flavors.RAW_OUTPUTS["end2end"]["output0"]:
+        raise ValueError(f"Unexpected end-to-end output: {rows.shape}")
+    if not np.isfinite(rows).all():
+        raise ValueError("End-to-end inference returned non-finite values")
+    if (rows[:, 4] < 0).any() or (rows[:, 4] > 1).any():
+        raise ValueError("End-to-end scores must be probabilities between zero and one")
+    classes = rows[:, 5]
+    if (classes != np.round(classes)).any() or (classes < 0).any() or (classes >= len(COCO_NAMES)).any():
+        raise ValueError("End-to-end class ids must be integers from 0 to 79")
+    kept = rows[rows[:, 4] >= SCORE_FLOOR]
+    return finish([(*row[:5], int(row[5])) for row in kept.tolist()], image_id, transform, category_ids,
+                  limit=len(rows))
 
 
 def deployment_detections(outputs, index, image_id, transform, category_ids):
-    names = class_names()
     count = int(outputs["num_dets"][index, 0])
     if not 0 <= count <= MAX_DETECTIONS:
         raise ValueError(f"Invalid deployment detection count: {count}")
@@ -188,13 +232,13 @@ def deployment_detections(outputs, index, image_id, transform, category_ids):
         box = outputs["det_boxes"][index, slot]
         score = float(outputs["det_scores"][index, slot])
         category = int(outputs["det_classes"][index, slot])
-        if not np.isfinite(box).all() or not math.isfinite(score) or not 0 <= category < len(names):
+        if not np.isfinite(box).all() or not math.isfinite(score) or not 0 <= category < len(COCO_NAMES):
             raise ValueError("Invalid deployment detection")
-        if score < OPERATING_SCORE:
+        if score < OPERATING_SCORE or COCO_NAMES[category] not in category_ids:
             continue
         original = original_box(box, transform)
         if original is not None:
-            selected.append({"image_id": image_id, "category_id": category_ids[names[category]],
+            selected.append({"image_id": image_id, "category_id": category_ids[COCO_NAMES[category]],
                              "bbox": original, "score": score})
     return selected
 
@@ -227,18 +271,26 @@ def evaluate(coco, images, category_ids, predictions, *, standard_ap=True):
         evaluator.evaluate()
         evaluator.accumulate()
         evaluator.summarize()
-    precision = evaluator.eval["precision"]
+    precision = evaluator.eval["precision"][:, :, :, 0, -1]
+    operating = [evaluator.params.catIds.index(category_ids[name]) for name in class_names()]
     overall = {
-        "map_50_95": mean_valid(precision[:, :, :, 0, -1]) if standard_ap else None,
-        "ap_50": mean_valid(precision[0, :, :, 0, -1]) if standard_ap else None,
+        "evaluated_classes": len(category_ids),
+        "map_50_95": mean_valid(precision) if standard_ap else None,
+        "ap_50": mean_valid(precision[0]) if standard_ap else None,
+        "aip_map_50_95": mean_valid(precision[:, :, operating]) if standard_ap else None,
+        "aip_ap_50": mean_valid(precision[0][:, operating]) if standard_ap else None,
+        "ap_50_95_by_class": ({name: mean_valid(precision[:, :, index])
+                               for index, name in enumerate(category_ids)} if standard_ap else None),
         "classes": {},
     }
     iou_index = int(np.flatnonzero(np.isclose(evaluator.params.iouThrs, 0.5))[0])
-    for name, category_id in category_ids.items():
+    area = evaluator.params.areaRng[0]
+    for name in class_names():
+        category_id = category_ids[name]
         category_index = evaluator.params.catIds.index(category_id)
         ground_truth, true_positives, false_positives = 0, 0, 0
         for item in evaluator.evalImgs:
-            if item is None or item["category_id"] != category_id or item["aRng"] != evaluator.params.areaRng[0]:
+            if item is None or item["category_id"] != category_id or item["aRng"] != area:
                 continue
             ground_truth += int(np.count_nonzero(np.logical_not(item["gtIgnore"])))
             chosen = np.asarray(item["dtScores"]) >= OPERATING_SCORE
@@ -248,7 +300,7 @@ def evaluate(coco, images, category_ids, predictions, *, standard_ap=True):
             false_positives += int(np.count_nonzero(chosen & ~matches & ~ignored))
         total = true_positives + false_positives
         overall["classes"][name] = {
-            "ap_50_95": mean_valid(precision[:, :, category_index, 0, -1]) if standard_ap else None,
+            "ap_50_95": mean_valid(precision[:, :, category_index]) if standard_ap else None,
             "ground_truth": ground_truth,
             "true_positives": true_positives,
             "false_positives": false_positives,
@@ -283,7 +335,9 @@ def compare(fp32, fp16, max_map_drop_pp=0.5, max_recall_drop_pp=1.0):
 
 
 class Runtimes:
-    def __init__(self, raw_onnx, engines, work_dir, trtexec):
+    def __init__(self, raw_onnx, engines, work_dir, trtexec, family="efficientnms"):
+        self.family = family
+        self.spec = flavors.RAW_OUTPUTS[family]
         self.trt, self.trt_info = benchmark.load_tensorrt(work_dir, trtexec)
         self.ort = ort.InferenceSession(
             str(raw_onnx), providers=[("CUDAExecutionProvider", {"device_id": 0, "use_tf32": 0})])
@@ -322,7 +376,7 @@ class Runtimes:
         float_type, int_type = self.trt.DataType.FLOAT, self.trt.DataType.INT32
         outputs = ({"num_dets": int_type, "det_boxes": float_type,
                     "det_scores": float_type, "det_classes": int_type}
-                   if label == DEPLOYMENT else {"raw_boxes": float_type, "raw_scores": float_type})
+                   if label == DEPLOYMENT else {name: float_type for name in self.spec})
         expected = {"images": (self.trt.TensorIOMode.INPUT, float_type)}
         expected.update({name: (self.trt.TensorIOMode.OUTPUT, dtype) for name, dtype in outputs.items()})
         actual = {
@@ -342,8 +396,7 @@ class Runtimes:
                          "det_scores": ((batch, MAX_DETECTIONS), np.float32),
                          "det_classes": ((batch, MAX_DETECTIONS), np.int32)}
             else:
-                specs = {name: ((batch, benchmark.CANDIDATES, width), np.float32)
-                         for name, width in benchmark.OUTPUTS.items()}
+                specs = {name: ((batch, *dims), np.float32) for name, dims in self.spec.items()}
             self.buffers[key] = {
                 name: ort.OrtValue.ortvalue_from_numpy(np.zeros(shape, dtype), "cuda", 0)
                 for name, (shape, dtype) in specs.items()
@@ -396,6 +449,9 @@ def infer_dataset(runtime, label, batch, images, images_dir, category_ids):
             if label == DEPLOYMENT:
                 detections = deployment_detections(outputs, index, image["id"],
                                                     transforms[index], category_ids)
+            elif runtime.family == "end2end":
+                detections = end2end_detections(outputs["output0"][index], image["id"],
+                                                transforms[index], category_ids)
             else:
                 detections = raw_detections(outputs["raw_boxes"][index], outputs["raw_scores"][index],
                                             image["id"], transforms[index], category_ids)
@@ -448,15 +504,17 @@ def score_predictions(args):
         "limitations": [
             "Image IDs and labels must match the captured frames; missing predictions are counted as misses.",
             "The declared confidence floor and completeness of pipeline capture cannot be verified from the JSON.",
-            "Training dataset and checkpoint provenance are undocumented; evaluation-set overlap is unknown.",
+            "Evaluation-set overlap with the training data is unknown for externally captured predictions.",
         ],
     }
     output.mkdir(parents=True, exist_ok=True)
     (output / "results.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
-    lines = ["| Class | AP 50:95 | Precision at 0.35 | Recall at 0.35 | TP | FP | FN |",
-             "|---|---:|---:|---:|---:|---:|---:|"]
     def percent(value):
         return "n/a" if value is None else f"{100 * value:.2f}%"
+    lines = [f'mAP 50:95 over {metrics["evaluated_classes"]} classes: {percent(metrics["map_50_95"])}; '
+             f'over car/person/truck: {percent(metrics["aip_map_50_95"])}', "",
+             "| Class | AP 50:95 | Precision at 0.35 | Recall at 0.35 | TP | FP | FN |",
+             "|---|---:|---:|---:|---:|---:|---:|"]
     for name, row in metrics["classes"].items():
         lines.append(f'| {name} | {percent(row["ap_50_95"])} | '
                      f'{percent(row["precision_at_035_iou_050"])} | '
@@ -552,16 +610,19 @@ def result_table(report):
     def percent(value):
         return "n/a" if value is None else f"{100 * value:.2f}%"
 
-    lines = ["| Variant | Batch | mAP 50:95 | AP 50 | Car recall | Person recall | Truck recall |",
-             "|---|---:|---:|---:|---:|---:|---:|"]
+    classes = report["dataset"]["evaluated_classes"]
+    lines = [f"| Variant | Batch | mAP 50:95 ({classes} classes) | AP 50 | mAP 50:95 (car, person, truck) "
+             "| Car recall | Person recall | Truck recall |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|"]
     for row in report["results"]:
         metrics = row["metrics"]
         recalls = [metrics["classes"][name]["recall_at_035_iou_050"]
                    for name in ("car", "person", "truck")]
         lines.append(f'| {row["variant"]} | {row["batch"]} | {percent(metrics["map_50_95"])} | '
-                     f'{percent(metrics["ap_50"])} | ' + " | ".join(percent(v) for v in recalls) + " |")
-    lines.append("\nRecall uses confidence >= 0.35 and IoU >= 0.50. "
-                 "Deployment mAP is omitted because its embedded NMS filters low scores.")
+                     f'{percent(metrics["ap_50"])} | {percent(metrics["aip_map_50_95"])} | '
+                     + " | ".join(percent(v) for v in recalls) + " |")
+    lines.append("\nmAP 50:95 is the COCO metric Ultralytics publishes. Recall uses confidence >= 0.35 "
+                 "and IoU >= 0.50. Deployment mAP is omitted because its embedded NMS filters low scores.")
     lines.extend(["", "| Variant | Batch | Class | AP 50:95 | Precision | Recall | TP | FP | FN |",
                   "|---|---:|---|---:|---:|---:|---:|---:|---:|"])
     for row in report["results"]:
@@ -596,6 +657,11 @@ def run(args):
     if (not math.isfinite(args.max_map_drop_pp) or not math.isfinite(args.max_recall_drop_pp)
             or args.max_map_drop_pp < 0 or args.max_recall_drop_pp < 0):
         raise ValueError("Allowed accuracy drops must be non-negative")
+    flavor = flavors.load(ROOT, args.flavor or flavors.active_id(ROOT))
+    family = flavor["family"]
+    if args.deployment_engine and family != "efficientnms":
+        raise ValueError("--deployment-engine only applies to the efficientnms family; the "
+                         f"{flavor['id']} engine has no embedded NMS to evaluate separately")
     coco, images, category_ids, dataset = select_dataset(args.annotations, args.images, args.limit)
     output.mkdir(parents=True, exist_ok=True)
     engines = {FP32: Path(args.fp32_engine), FP16: Path(args.fp16_engine)}
@@ -605,7 +671,7 @@ def run(args):
                  **{label: benchmark.sha256(path) for label, path in engines.items()}}
     if args.source_onnx:
         artifacts["source_onnx"] = benchmark.sha256(args.source_onnx)
-    runtime = Runtimes(args.onnx, engines, output, args.trtexec)
+    runtime = Runtimes(args.onnx, engines, output, args.trtexec, family)
     results = []
     try:
         for batch in args.batches:
@@ -625,6 +691,8 @@ def run(args):
                                                args.max_recall_drop_pp)
         report = {
             "utc": datetime.now(timezone.utc).isoformat(),
+            "flavor": flavor["id"],
+            "reference_coco_map_50_95": flavor["reference"]["coco_map50_95"],
             "dataset": dataset,
             "artifact_sha256": artifacts,
             "versions": {"python": platform.python_version(), "numpy": np.__version__,
@@ -634,14 +702,17 @@ def run(args):
             "onnxruntime_providers": runtime.providers,
             "method": {
                 "input": "RGB, aspect-preserving top-left resize to 640x640, black padding, /255",
-                "raw_postprocess": "center-size boxes, score >= 0.001, top 4096 candidates, "
-                                   "class-aware OpenCV NMS IoU 0.65, at most 100 per image",
+                "raw_postprocess": (
+                    "center-size boxes, score >= 0.001, top 1000 candidates per class, "
+                    "class-aware OpenCV NMS IoU 0.65, at most 100 per image" if family == "efficientnms"
+                    else "NMS-free model rows, score >= 0.001, up to 300 per image as in Ultralytics validation"),
                 "deployment": "actual TensorRT engine with embedded EfficientNMS; direct inference only",
                 "metrics": "COCO bbox AP at IoU 0.50:0.95 and 0.50; precision/recall at "
                            "confidence >= 0.35 and IoU 0.50, following COCO crowd/ignore rules",
                 "batch_padding": "last partial batch is zero-padded; padded outputs are ignored",
                 "limitations": [
-                    "Training dataset and checkpoint provenance are undocumented; evaluation-set overlap is unknown.",
+                    "COCO val2017 is held out from the official training recipes, but the tool cannot "
+                    "verify the training data of the supplied checkpoint.",
                     "OpenCV preprocessing and NMS are not proven identical to DeepStream preprocessing or the plugin.",
                     "Direct engine evaluation does not exercise the DeepStream parser, tracking or callbacks.",
                     "A small ordered subset is a smoke test, not a representative accuracy estimate.",
@@ -674,10 +745,13 @@ def main(argv=None):
 
     run_parser = commands.add_parser("run", help="compare labelled model and deployment-engine inference")
     dataset_arguments(run_parser)
-    run_parser.add_argument("--onnx", required=True, help="NMS-free raw ONNX graph")
+    run_parser.add_argument("--flavor", help="flavor id (default: the packaged flavor)")
+    run_parser.add_argument("--onnx", required=True,
+                            help="NMS-free ONNX graph: raw.onnx from benchmark.py (YOLOv7) or the exported graph")
     run_parser.add_argument("--fp32-engine", required=True, help="TensorRT FP32 engine built from --onnx")
     run_parser.add_argument("--fp16-engine", required=True, help="TensorRT FP16 engine built from --onnx")
-    run_parser.add_argument("--deployment-engine", help="actual deployment engine with EfficientNMS")
+    run_parser.add_argument("--deployment-engine",
+                            help="actual YOLOv7 deployment engine with EfficientNMS (efficientnms flavors only)")
     run_parser.add_argument("--source-onnx", help="deployment ONNX, recorded by hash")
     run_parser.add_argument("--batches", nargs="+", type=int, default=list(benchmark.BATCHES))
     run_parser.add_argument("--trtexec", default=benchmark.DEFAULT_TRTEXEC)

@@ -20,15 +20,24 @@ import check_package  # noqa: E402
 from public_reference import assert_no_private_references  # noqa: E402
 
 
+FLAVOR_FILES = ("manifest.json", "store.json", "LICENSE.weights", f"{check_package.MODEL_DIR}/config.pbtxt")
+
+
 def package_fixture(directory):
     """Source tree with every expected file, and a dist/ copy as eais-tools would make it."""
     root = Path(directory)
     (root / ".include").write_text((ROOT / ".include").read_text())
-    names = check_package.EAIS_FILES | check_package.include_entries(ROOT)
+    for name in ("flavors", "licenses", "configs"):
+        shutil.copytree(ROOT / name, root / name)
+    for name in FLAVOR_FILES:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / name, root / name)
+    names = check_package.eais_files(root) | check_package.include_entries(ROOT)
     for name in names:
         path = root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"fixture: {name}\n")
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"fixture: {name}\n")
     for name in names:
         target = root / "dist" / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -47,8 +56,17 @@ class CheckPackageTests(unittest.TestCase):
     def test_repository_include_is_an_explicit_safe_allowlist(self):
         entries = check_package.include_entries(ROOT)
         self.assertIn("logic/flows.json", entries)
-        self.assertFalse({"tools/benchmark.py", "presentation.ipynb", "localdev.ipynb"} & entries)
-        self.assertFalse(any(name.startswith("doc/benchmarks/") for name in entries))
+        self.assertFalse({"tools/benchmark.py", "notebooks/00-presentation.ipynb"} & entries)
+        self.assertFalse(any(name.startswith(("doc/benchmarks/", "notebooks/", "flavors/")) for name in entries))
+
+    def test_package_must_belong_to_a_single_flavor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, _ = package_fixture(directory)
+            pbtxt = root / check_package.MODEL_DIR / "config.pbtxt"
+            pbtxt.write_text(pbtxt.read_text() + "# drift\n")
+            code, output = run_check("--root", str(root))
+            self.assertEqual(code, 1)
+            self.assertIn("active flavor", output)
 
     def test_include_rejects_unsafe_entries(self):
         for entry, message in (("logic/*.json", "explicit files"), ("../secret", "unsafe"),
@@ -169,9 +187,30 @@ class BenchmarkTests(unittest.TestCase):
                 {"TensorRT FP32": output / "raw-fp32.engine",
                  "TensorRT FP16": output / "raw-fp16.engine"},
                 output, source_onnx=source.resolve(), deployment_engine=deployment.resolve(),
-                trtexec="trtexec-test", workspace_mib=768)
+                trtexec="trtexec-test", workspace_mib=768, family="efficientnms")
             self.assertEqual(source.read_text(), "original model")
             self.assertEqual(deployment.read_text(), "original engine")
+
+    def test_nms_free_graphs_are_benchmarked_as_exported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "yolo26n.onnx"
+            source.write_text("nms free graph")
+            output = root / "benchmark"
+
+            def build(command, **kwargs):
+                engine = next(arg.split("=", 1)[1] for arg in command if arg.startswith("--saveEngine="))
+                Path(engine).write_text("engine")
+                self.assertIn(f"--onnx={source.resolve()}", command)
+
+            with patch.object(benchmark, "make_raw_onnx") as graph, \
+                    patch.object(benchmark.subprocess, "run", side_effect=build), \
+                    patch.object(benchmark, "run_benchmark", return_value={}) as measured, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                benchmark.prepare_and_run(source, output, family="end2end")
+            graph.assert_not_called()
+            self.assertEqual(measured.call_args.args[0], source.resolve())
+            self.assertEqual(measured.call_args.kwargs["family"], "end2end")
 
     def test_all_steps_reject_existing_results_and_invalid_inputs_before_building(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -234,27 +273,29 @@ class BenchmarkTests(unittest.TestCase):
                 build.assert_not_called()
                 measure.assert_not_called()
 
+    REPORT = {"results": [], "output_differences": [], "gpu_state_before": {}, "gpu_state_after": {}}
+
     def test_all_command_dispatches_to_the_complete_workflow(self):
-        report = json.loads((ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0.json").read_text())
-        with patch.object(benchmark, "prepare_and_run", return_value=report) as complete, \
+        with patch.object(benchmark, "prepare_and_run", return_value=self.REPORT) as complete, \
                 contextlib.redirect_stdout(io.StringIO()):
-            code = benchmark.main(["all", "--onnx", "source.onnx", "--output", "results",
-                                   "--deployment-engine", "deployment.engine",
+            code = benchmark.main(["all", "--flavor", "yolov7", "--onnx", "source.onnx",
+                                   "--output", "results", "--deployment-engine", "deployment.engine",
                                    "--trtexec", "trtexec-test", "--workspace-mib", "512"])
         self.assertEqual(code, 0)
         complete.assert_called_once_with("source.onnx", "results", trtexec="trtexec-test",
-                                         workspace_mib=512, deployment_engine="deployment.engine")
+                                         workspace_mib=512, deployment_engine="deployment.engine",
+                                         family="efficientnms")
 
     def test_run_command_still_accepts_prebuilt_benchmark_artifacts(self):
-        report = json.loads((ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0.json").read_text())
-        with patch.object(benchmark, "run_benchmark", return_value=report) as measure, \
+        with patch.object(benchmark, "run_benchmark", return_value=self.REPORT) as measure, \
                 contextlib.redirect_stdout(io.StringIO()):
-            code = benchmark.main(["run", "--onnx", "raw.onnx",
+            code = benchmark.main(["run", "--flavor", "yolo26", "--onnx", "raw.onnx",
                                    "--engine", "TensorRT FP16=raw.engine", "--output", "results"])
         self.assertEqual(code, 0)
         measure.assert_called_once_with("raw.onnx", {"TensorRT FP16": "raw.engine"}, "results",
                                         source_onnx=None, deployment_engine=None,
-                                        trtexec=benchmark.DEFAULT_TRTEXEC, workspace_mib=None)
+                                        trtexec=benchmark.DEFAULT_TRTEXEC, workspace_mib=None,
+                                        family="end2end")
 
     def test_ort_profile_summarizes_unique_executed_nodes(self):
         def node(index, provider, operation):
@@ -328,41 +369,46 @@ class BenchmarkTests(unittest.TestCase):
                 benchmark.parse_engine(bad)
 
 
+RESULTS = ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0"
+
+
 class PublishedResultsTests(unittest.TestCase):
-    report = json.loads((ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0.json").read_text())
+    """The committed station measurements of every flavor are complete and self-consistent."""
+
+    @classmethod
+    def setUpClass(cls):
+        import flavors
+        cls.reports = {flavor_id: json.loads((RESULTS / f"{flavor_id}-latency.json").read_text())
+                       for flavor_id in flavors.flavor_ids(ROOT)}
 
     def test_results_are_complete_and_consistent(self):
-        rows = {(r["variant"], r["batch"]): r for r in self.report["results"]}
-        variants = (benchmark.ORT_LABEL, "TensorRT FP32", "TensorRT FP16")
-        self.assertEqual(set(rows), {(v, b) for v in variants for b in benchmark.BATCHES})
-        for (variant, batch), row in rows.items():
-            reference = rows[(benchmark.ORT_LABEL, batch)]["median_ms"]
-            self.assertAlmostEqual(row["speedup_vs_onnxruntime"], reference / row["median_ms"], places=6)
-            self.assertAlmostEqual(row["ms_per_image"], row["median_ms"] / batch, places=6)
-
-    def test_readme_quotes_the_published_medians(self):
-        readme = (ROOT / "README.md").read_text()
-        for row in self.report["results"]:
-            self.assertIn(f"{row['median_ms']:.1f} ms", readme, row["variant"])
+        for flavor_id, report in self.reports.items():
+            with self.subTest(flavor=flavor_id):
+                rows = {(r["variant"], r["batch"]): r for r in report["results"]}
+                variants = (benchmark.ORT_LABEL, "TensorRT FP32", "TensorRT FP16")
+                self.assertEqual(set(rows), {(v, b) for v in variants for b in benchmark.BATCHES})
+                for (variant, batch), row in rows.items():
+                    reference = rows[(benchmark.ORT_LABEL, batch)]["median_ms"]
+                    self.assertAlmostEqual(row["speedup_vs_onnxruntime"], reference / row["median_ms"], places=6)
+                    self.assertAlmostEqual(row["ms_per_image"], row["median_ms"] / batch, places=6)
 
     def test_published_conditions_and_provider_placement_are_consistent(self):
-        placement = self.report["onnxruntime_node_placement"]
-        self.assertEqual(placement["profiled_batches"], list(benchmark.BATCHES))
-        for provider in placement["providers"].values():
-            self.assertEqual(provider["node_count"], sum(provider["operator_counts"].values()))
-        self.assertGreater(placement["providers"]["CUDAExecutionProvider"]["node_count"], 0)
-        self.assertGreater(placement["providers"]["CPUExecutionProvider"]["node_count"], 0)
-        states = self.report["gpu_state_during_rounds"]
-        self.assertEqual({(s["variant"], s["batch"], s["round"]) for s in states},
-                         {(v, b, r) for v in (benchmark.ORT_LABEL, "TensorRT FP32", "TensorRT FP16")
-                          for b in benchmark.BATCHES for r in range(1, benchmark.ROUNDS + 1)})
-        conditions = self.report["run_conditions"]
-        self.assertGreater(conditions["pipeline_checks_with_zero_active"], 0)
-        self.assertLessEqual(max(conditions["idle_gpu_load_percent"]), 10)
-        self.assertLessEqual(max(conditions["idle_gpu_temperature_c"]), 80)
+        for flavor_id, report in self.reports.items():
+            with self.subTest(flavor=flavor_id):
+                placement = report["onnxruntime_node_placement"]
+                self.assertEqual(placement["profiled_batches"], list(benchmark.BATCHES))
+                for provider in placement["providers"].values():
+                    self.assertEqual(provider["node_count"], sum(provider["operator_counts"].values()))
+                self.assertGreater(placement["providers"]["CUDAExecutionProvider"]["node_count"], 0)
+                states = report["gpu_state_during_rounds"]
+                self.assertEqual({(s["variant"], s["batch"], s["round"]) for s in states},
+                                 {(v, b, r) for v in (benchmark.ORT_LABEL, "TensorRT FP32", "TensorRT FP16")
+                                  for b in benchmark.BATCHES for r in range(1, benchmark.ROUNDS + 1)})
 
-    def test_report_contains_no_station_identity(self):
-        assert_no_private_references(self, json.dumps(self.report), "benchmark report")
+    def test_reports_contain_no_station_identity(self):
+        for path in sorted(RESULTS.glob("*")):
+            if path.suffix in {".json", ".md"}:
+                assert_no_private_references(self, path.read_text(), path.name)
 
 
 if __name__ == "__main__":

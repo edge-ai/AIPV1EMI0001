@@ -39,7 +39,7 @@ by itself install or activate them in the Node-RED runtime. The standalone
 
 ## Install the project
 
-Deployment is independent of `localdev.ipynb`. From the AIP root in a station
+Deployment is independent of the build notebooks. From the AIP root in a station
 App-Builder terminal, run:
 
 ```bash

@@ -14,7 +14,7 @@ if AVAILABLE:
     import cv2
     import numpy as np
     import accuracy
-    import benchmark
+    import flavors
 
 
 @unittest.skipUnless(AVAILABLE, "accuracy evaluation dependencies are not installed")
@@ -58,19 +58,33 @@ class AccuracyTests(unittest.TestCase):
                 accuracy.prepare_image(directory, {**image, "width": 201})
 
     def test_raw_nms_is_class_aware_and_uses_center_size(self):
-        boxes = np.zeros((benchmark.CANDIDATES, 4), np.float32)
-        scores = np.zeros((benchmark.CANDIDATES, 3), np.float32)
+        boxes = np.zeros((flavors.CANDIDATES, 4), np.float32)
+        scores = np.zeros((flavors.CANDIDATES, flavors.COCO_CLASSES), np.float32)
         boxes[0] = boxes[1] = [320, 160, 320, 160]
-        scores[0, :2] = [0.9, 0.5]
-        scores[1, 0] = 0.8
-        predictions = accuracy.raw_detections(boxes, scores, 7, (3.2, 3.2, 200, 100),
-                                              {"car": 3, "person": 1, "truck": 8})
+        scores[0, [2, 0, 1]] = [0.9, 0.5, 0.99]   # car, person and a bicycle this AI Processor does not report
+        scores[1, 2] = 0.8                          # same box and class as the car: suppressed
+        categories = {"car": 3, "person": 1, "truck": 8}
+        predictions = accuracy.raw_detections(boxes, scores, 7, (3.2, 3.2, 200, 100), categories)
         self.assertEqual([p["category_id"] for p in predictions], [3, 1])
         self.assertEqual(predictions[0]["bbox"], [50, 25, 100, 50])
         boxes[0, 0] = np.nan
         with self.assertRaisesRegex(ValueError, "non-finite"):
-            accuracy.raw_detections(boxes, scores, 7, (3.2, 3.2, 200, 100),
-                                    {"car": 3, "person": 1, "truck": 8})
+            accuracy.raw_detections(boxes, scores, 7, (3.2, 3.2, 200, 100), categories)
+
+    def test_end2end_rows_keep_reported_classes_and_validate_the_head(self):
+        rows = np.zeros((300, 6), np.float32)
+        rows[0] = [64, 64, 192, 192, 0.9, 7]    # truck
+        rows[1] = [64, 64, 192, 192, 0.8, 1]    # bicycle: not reported
+        rows[2] = [64, 64, 192, 192, 0.0005, 2]  # below the score floor
+        rows[3] = [64, 64, 64, 192, 0.7, 0]     # empty box
+        categories = {"car": 3, "person": 1, "truck": 8}
+        predictions = accuracy.end2end_detections(rows, 5, (6.4, 6.4, 100, 100), categories)
+        self.assertEqual([(p["category_id"], p["bbox"]) for p in predictions], [(8, [10, 10, 20, 20])])
+        with self.assertRaisesRegex(ValueError, "Unexpected"):
+            accuracy.end2end_detections(rows[:10], 5, (6.4, 6.4, 100, 100), categories)
+        rows[0, 5] = 80
+        with self.assertRaisesRegex(ValueError, "class ids"):
+            accuracy.end2end_detections(rows, 5, (6.4, 6.4, 100, 100), categories)
 
     def test_dataset_mapping_fingerprint_selection_and_unsafe_paths(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -137,12 +151,13 @@ class AccuracyTests(unittest.TestCase):
                            for i, category in ((1, 3), (2, 1), (3, 8))]
             metrics = accuracy.evaluate(coco, images, categories, predictions)
             deployment = accuracy.evaluate(coco, images, categories, predictions, standard_ap=False)
-            report = {"results": [
+            report = {"dataset": {"evaluated_classes": 3}, "results": [
                 {"variant": accuracy.FP32, "batch": 1, "metrics": metrics},
                 {"variant": accuracy.DEPLOYMENT, "batch": 1, "metrics": deployment},
             ], "fp16_parity_vs_trt_fp32": {"1": accuracy.compare(metrics, metrics)}}
             table = accuracy.result_table(report)
-            self.assertIn("| Class | AP 50:95 | Precision | Recall | TP | FP | FN |", table)
+            self.assertIn("| Variant | Batch | Class | AP 50:95 | Precision | Recall | TP | FP | FN |", table)
+            self.assertIn("mAP 50:95 (3 classes)", table)
             self.assertIn("| TensorRT FP32 | 1 | car | 100.00% | 100.00% | 100.00% | 1 | 0 | 0 |", table)
             self.assertIn("| Deployment engine | 1 | car | n/a | 100.00% | 100.00% | 1 | 0 | 0 |", table)
 
@@ -161,46 +176,56 @@ class AccuracyTests(unittest.TestCase):
         self.assertEqual(accuracy.compare(base, no_trucks)["status"], "not_evaluable")
 
     def test_same_images_and_padding_across_variants(self):
+        coco_index = {1: 2, 2: 0, 3: 7}   # car, person, truck in the COCO class list
+
         class FakeRuntime:
+            def __init__(self, family):
+                self.family = family
+
             def infer(self, label, inputs):
                 batch = inputs.shape[0]
-                boxes = np.zeros((batch, benchmark.CANDIDATES, 4), np.float32)
-                scores = np.zeros((batch, benchmark.CANDIDATES, 3), np.float32)
+                boxes = np.zeros((batch, flavors.CANDIDATES, 4), np.float32)
+                scores = np.zeros((batch, flavors.CANDIDATES, flavors.COCO_CLASSES), np.float32)
+                rows = np.zeros((batch, 300, 6), np.float32)
                 for index in range(batch):
-                    class_index = round(float(inputs[index, 0, 0, 0]) * 255 / 80) - 1
-                    if class_index >= 0:
+                    shade = round(float(inputs[index, 0, 0, 0]) * 255 / 80)
+                    if shade in coco_index:
                         boxes[index, 0] = [128, 128, 128, 128]
-                        scores[index, 0, class_index] = 0.9
+                        scores[index, 0, coco_index[shade]] = 0.9
+                        rows[index, 0] = [64, 64, 192, 192, 0.9, coco_index[shade]]
+                if self.family == "end2end":
+                    return {"output0": rows}
                 return {"raw_boxes": boxes, "raw_scores": scores}
 
-        with tempfile.TemporaryDirectory() as directory:
-            labels = self.dataset(directory)
-            coco, images, categories, _ = accuracy.select_dataset(labels, directory, 0)
-            rows = []
-            for label, batch in ((accuracy.ORT, 1), (accuracy.FP32, 4), (accuracy.FP16, 8)):
-                predictions = accuracy.infer_dataset(FakeRuntime(), label, batch, images, directory, categories)
-                self.assertEqual(len(predictions), 3)
-                rows.append(accuracy.evaluate(coco, images, categories, predictions))
-            self.assertEqual(rows[0], rows[1])
-            self.assertEqual(rows[1], rows[2])
-            self.assertAlmostEqual(rows[0]["map_50_95"], 1.0)
+        for family in sorted(flavors.FAMILIES):
+            with self.subTest(family=family), tempfile.TemporaryDirectory() as directory:
+                labels = self.dataset(directory)
+                coco, images, categories, _ = accuracy.select_dataset(labels, directory, 0)
+                rows = []
+                for label, batch in ((accuracy.ORT, 1), (accuracy.FP32, 4), (accuracy.FP16, 8)):
+                    predictions = accuracy.infer_dataset(FakeRuntime(family), label, batch, images,
+                                                         directory, categories)
+                    self.assertEqual(len(predictions), 3)
+                    rows.append(accuracy.evaluate(coco, images, categories, predictions))
+                self.assertEqual(rows[0], rows[1])
+                self.assertEqual(rows[1], rows[2])
+                self.assertAlmostEqual(rows[0]["map_50_95"], 1.0)
 
     def test_deployment_outputs_are_decoded_without_claiming_ap(self):
         outputs = {
             "num_dets": np.array([[2]], np.int32),
             "det_boxes": np.array([[[64, 64, 192, 192], [0, 0, 20, 20]]], np.float32),
             "det_scores": np.array([[0.9, 0.2]], np.float32),
-            "det_classes": np.array([[1, 0]], np.int32),
+            "det_classes": np.array([[0, 2]], np.int32),
         }
-        predictions = accuracy.deployment_detections(
-            outputs, 0, 1, (6.4, 6.4, 100, 100), {"car": 3, "person": 1, "truck": 8})
+        categories = {"car": 3, "person": 1, "truck": 8}
+        predictions = accuracy.deployment_detections(outputs, 0, 1, (6.4, 6.4, 100, 100), categories)
         self.assertEqual(len(predictions), 1)
         self.assertEqual(predictions[0]["category_id"], 1)
         self.assertEqual(predictions[0]["bbox"], [10, 10, 20, 20])
-        outputs["det_classes"][0, 0] = 4
+        outputs["det_classes"][0, 0] = 80
         with self.assertRaisesRegex(ValueError, "Invalid deployment"):
-            accuracy.deployment_detections(outputs, 0, 1, (6.4, 6.4, 100, 100),
-                                           {"car": 3, "person": 1, "truck": 8})
+            accuracy.deployment_detections(outputs, 0, 1, (6.4, 6.4, 100, 100), categories)
 
     def test_external_predictions_are_validated_and_score_floor_is_disclosed(self):
         with tempfile.TemporaryDirectory() as directory:

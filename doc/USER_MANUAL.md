@@ -1,8 +1,10 @@
 # AIPV1EMI0001 — User Manual
 
-YOLOv7-tiny object detector for the EdgeAI Station: real-time detection of
+YOLO object detector for the EdgeAI Station: real-time detection of
 **`car`**, **`person`** and **`truck`** in up to 8 input streams, with ROI
-(region of interest) and LCC (line crossing counter) analytics.
+(region of interest) and LCC (line crossing counter) analytics. The package
+carries one detector, chosen at build time among YOLOv7-tiny, YOLOv10n and YOLO26n;
+the [README](../README.md#choose-a-model) compares them.
 
 ## Requirements
 
@@ -19,12 +21,13 @@ YOLOv7-tiny object detector for the EdgeAI Station: real-time detection of
 3. Create a pipeline that uses the AIP. No Triton registration is needed: inference
    runs inside the DeepStream pipeline (`nvinferserver`).
 
-To build from source instead, follow [`localdev.ipynb`](../localdev.ipynb) step by step.
+To build from source instead, follow the build notebook of the model you want, for example
+[`03-build-yolo26.ipynb`](../notebooks/03-build-yolo26.ipynb).
 
 ## Configuration
 
 No `options.json` — the detector runs with the defaults baked into
-`configs/config_infer_primary_detector_yolov7.txt` (confidence threshold 0.35, NMS IoU 0.65)
+`configs/config_infer_primary_detector_<flavor>.txt` (confidence threshold 0.35, NMS IoU 0.65)
 and `configs/config_tracker_NvDCF_perf.yml` (NvDCF tracker parameters).
 
 ## Node-RED dashboard
@@ -152,10 +155,19 @@ pipeline health separately.
 
 ## Model
 
-- Architecture: YOLOv7-tiny (WongKinYiu et al., CVPR 2023, GPL-3.0) — see README attribution
-- Integration: an EdgeAI Station adaptation exposing three object classes. The
-  trainer, training dataset, intended domain, and complete checkpoint provenance
-  have not been independently documented.
-- Artifacts: `yolov7tiny-640.onnx` with an `EfficientNMS_TRT` node, built into a TensorRT FP16 engine
-  (dynamic batch 1–8, 640×640 input)
+The package carries one detector. Every flavor is the publisher's official
+COCO-pretrained model at 640×640, exposed as three classes: COCO `car` → `car`,
+`person` → `person`, `truck` → `truck`. The other 77 COCO classes are discarded by the
+parser, so the model is a general detector for these three classes rather than a model
+trained for one scene.
+
+| Flavor | Model | Output head | Weights licence |
+|---|---|---|---|
+| `yolov7` | YOLOv7-tiny, WongKinYiu et al., CVPR 2023 | Anchors, NMS inside the ONNX graph (`EfficientNMS_TRT`) | GPL-3.0 |
+| `yolov10` | YOLOv10n, Tsinghua University, NeurIPS 2024 | NMS-free, 300 candidates | AGPL-3.0 |
+| `yolo26` | YOLO26n, Ultralytics | NMS-free, 300 candidates | AGPL-3.0 |
+
+- Engine: TensorRT FP16, dynamic batch 1–8, built on the station from the ONNX export;
+  see the build notebooks.
 - Tracker: NVIDIA NvDCF
+- Licences: see the README. The weights' licence text ships as `LICENSE.weights`.

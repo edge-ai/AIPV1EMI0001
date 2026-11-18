@@ -1,0 +1,18 @@
+# Packages used only by tools/export_model.py for the YOLOv10 and YOLO26 flavors.
+#
+# Install them WITHOUT dependencies, so pip keeps the PyTorch, NumPy and ONNX Runtime
+# builds that the EdgeAI Station already provides (a regular install would replace its GPU build):
+#
+#     python3 -m pip install --user --no-deps -r tools/requirements-export.txt
+#
+# The station environment supplies torch, torchvision, onnx, onnxsim, onnxruntime, numpy,
+# opencv, pandas, matplotlib, PyYAML, requests, pillow and psutil. The YOLOv7 flavor needs none of the packages below.
+ultralytics==8.4.215
+ultralytics-thop==2.2.5
+thop==0.1.1.post2209072238
+onnxslim==0.1.99
+onnx-graphsurgeon==0.6.1
+polars==2.0.0
+scipy==1.15.3
+seaborn==0.13.2
+tqdm==4.70.1

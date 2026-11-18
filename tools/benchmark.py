@@ -6,17 +6,22 @@ GPU-resident input and the same timing boundary per request:
 
     cudaDeviceSynchronize -> perf_counter_ns -> one inference call -> cudaDeviceSynchronize
 
-Usage (from the repository root, inside the station's Jupyter container):
+Usage (from the repository root, inside the station's Jupyter container, after
+python3 tools/export_model.py FLAVOR has written tmp/export/FLAVOR/):
 
-    python3 tools/benchmark.py all --onnx models/AIPV1EMI0001_Yolo_Detector/yolov7tiny-640.onnx \\
-        --output tmp/inference-benchmark/my-run
+    python3 tools/benchmark.py all --flavor yolo26 --output tmp/inference-benchmark/yolo26
 
 The all command prepares the graph, builds both engines and measures them. Use a
 new or empty output directory; failed builds leave their logs there for inspection.
+The flavor (default: the packaged one) selects the model family:
+
+    efficientnms  YOLOv7: the EfficientNMS_TRT node is cut off, leaving raw_boxes and raw_scores
+    end2end       YOLOv10 / YOLO26: the graph is measured as exported (NMS-free, output0)
+
 For separately prepared graphs and engines, the lower-level commands remain:
 
     python3 tools/benchmark.py raw-onnx SOURCE.onnx RAW.onnx
-    python3 tools/benchmark.py run --onnx RAW.onnx \\
+    python3 tools/benchmark.py run --flavor yolov7 --onnx RAW.onnx \\
         --engine "TensorRT FP32=raw-fp32.engine" --engine "TensorRT FP16=raw-fp16.engine" \\
         --output RESULTS_DIR
 
@@ -35,10 +40,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import flavors
+
+ROOT = Path(__file__).resolve().parents[1]
 BATCHES = (1, 4, 8)
 WARMUP_REQUESTS, MEASURED_REQUESTS, ROUNDS = 20, 50, 3
-OUTPUTS = {"raw_boxes": 4, "raw_scores": 3}
-CANDIDATES = 25200
 ORT_LABEL = "ONNX Runtime CUDA FP32"
 DEFAULT_TRTEXEC = "/usr/src/tensorrt/bin/trtexec"
 
@@ -54,8 +60,8 @@ def sha256(path):
 def make_raw_onnx(source, destination):
     """Copy the deployment ONNX without its terminal EfficientNMS_TRT node.
 
-    The copy exposes the NMS inputs as raw_boxes [batch, candidates, 4] and
-    raw_scores [batch, candidates, 3]. Weights and the source file are unchanged.
+    The copy exposes the NMS inputs as raw_boxes [batch, 25200, 4] and
+    raw_scores [batch, 25200, 80]. Weights and the source file are unchanged.
     """
     import onnx
     from onnx import TensorProto, helper, shape_inference
@@ -71,12 +77,13 @@ def make_raw_onnx(source, destination):
     raw_names = list(nms.input)
     graph.graph.node.remove(nms)
     del graph.graph.output[:]
+    outputs = flavors.RAW_OUTPUTS["efficientnms"]
     graph.graph.output.extend([
-        helper.make_tensor_value_info(name, TensorProto.FLOAT, ["batch", "candidates", width])
-        for name, width in zip(raw_names, OUTPUTS.values())
+        helper.make_tensor_value_info(name, TensorProto.FLOAT, ["batch", *dims])
+        for name, dims in zip(raw_names, outputs.values())
     ])
     graph = shape_inference.infer_shapes(graph)
-    renames = dict(zip(raw_names, OUTPUTS))
+    renames = dict(zip(raw_names, outputs))
     for node in graph.graph.node:
         for field in (node.input, node.output):
             for index, name in enumerate(field):
@@ -89,7 +96,7 @@ def make_raw_onnx(source, destination):
     onnx.save(graph, destination)
     assert sha256(source) == source_sha, "The deployment graph must remain unchanged"
     print(f"Benchmark-only graph: {destination} ({len(graph.graph.node)} nodes)")
-    print("Outputs: raw_boxes [batch, candidates, 4], raw_scores [batch, candidates, 3]")
+    print("Outputs: raw_boxes [batch, 25200, 4], raw_scores [batch, 25200, 80]")
     return destination
 
 
@@ -229,12 +236,13 @@ def l4t_release():
 
 
 def run_benchmark(raw_onnx, engines, output_dir, *, source_onnx=None, deployment_engine=None,
-                  trtexec=DEFAULT_TRTEXEC, workspace_mib=None):
+                  trtexec=DEFAULT_TRTEXEC, workspace_mib=None, family="efficientnms"):
     import numpy as np
     import onnx
     import onnxruntime as ort
 
     raw_onnx, output_dir = Path(raw_onnx), Path(output_dir)
+    outputs_spec = flavors.RAW_OUTPUTS[family]
     output_dir.mkdir(parents=True, exist_ok=True)
     engines = {label: Path(path) for label, path in engines.items()}
     assert "CUDAExecutionProvider" in ort.get_available_providers(), "ONNX Runtime CUDA provider missing"
@@ -269,8 +277,8 @@ def run_benchmark(raw_onnx, engines, output_dir, *, source_onnx=None, deployment
 
     def gpu_outputs(batch):
         return {name: ort.OrtValue.ortvalue_from_numpy(
-                    np.zeros((batch, CANDIDATES, width), np.float32), "cuda", 0)
-                for name, width in OUTPUTS.items()}
+                    np.zeros((batch, *dims), np.float32), "cuda", 0)
+                for name, dims in outputs_spec.items()}
 
     for batch in BATCHES:
         profile_input = ort.OrtValue.ortvalue_from_numpy(
@@ -298,7 +306,7 @@ def run_benchmark(raw_onnx, engines, output_dir, *, source_onnx=None, deployment
                                           engine.get_tensor_dtype(engine.get_tensor_name(i)))
               for i in range(engine.num_io_tensors)}
         assert io == {"images": (trt.TensorIOMode.INPUT, trt.DataType.FLOAT),
-                      **{name: (trt.TensorIOMode.OUTPUT, trt.DataType.FLOAT) for name in OUTPUTS}}, io
+                      **{name: (trt.TensorIOMode.OUTPUT, trt.DataType.FLOAT) for name in outputs_spec}}, io
         contexts[label] = (engine, engine.create_execution_context())
     stream = ctypes.c_void_p()
     cuda_check(cudart.cudaStreamCreateWithFlags(ctypes.byref(stream), 1), "cudaStreamCreateWithFlags")
@@ -352,9 +360,9 @@ def run_benchmark(raw_onnx, engines, output_dir, *, source_onnx=None, deployment
 
         reference = {name: value.numpy() for name, value in outputs[ORT_LABEL].items()}
         for label in runners:
-            for name, width in OUTPUTS.items():
+            for name, dims in outputs_spec.items():
                 values = outputs[label][name].numpy()
-                assert values.shape == (batch, CANDIDATES, width) and np.isfinite(values).all(), (label, name)
+                assert values.shape == (batch, *dims) and np.isfinite(values).all(), (label, name)
                 if label != ORT_LABEL:
                     error = np.abs(values - reference[name])
                     differences.append({
@@ -376,6 +384,7 @@ def run_benchmark(raw_onnx, engines, output_dir, *, source_onnx=None, deployment
 
     report = {
         "utc": datetime.now(timezone.utc).isoformat(),
+        "family": family,
         "method": "per request: cudaDeviceSynchronize, perf_counter_ns, one inference call, "
                   "cudaDeviceSynchronize; shared GPU-resident input; preallocated GPU outputs",
         "source_onnx_sha256": sha256(source_onnx) if source_onnx else None,
@@ -419,8 +428,12 @@ def markdown_table(report):
 
 
 def prepare_and_run(source_onnx, output_dir, *, trtexec=DEFAULT_TRTEXEC,
-                    workspace_mib=1024, deployment_engine=None):
-    """Prepare a fresh benchmark run without changing the deployment artifacts."""
+                    workspace_mib=1024, deployment_engine=None, family="efficientnms"):
+    """Prepare a fresh benchmark run without changing the deployment artifacts.
+
+    For the efficientnms family the NMS node is cut off first; the end2end family
+    is already NMS-free, so its ONNX graph is benchmarked as exported.
+    """
     source_onnx = Path(source_onnx).resolve(strict=True)
     if deployment_engine is not None:
         deployment_engine = Path(deployment_engine).resolve(strict=True)
@@ -430,7 +443,8 @@ def prepare_and_run(source_onnx, output_dir, *, trtexec=DEFAULT_TRTEXEC,
     if output_dir.exists() and any(output_dir.iterdir()):
         raise FileExistsError(f"Use a new or empty benchmark output directory: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    raw_onnx = make_raw_onnx(source_onnx, output_dir / "raw.onnx")
+    raw_onnx = (make_raw_onnx(source_onnx, output_dir / "raw.onnx") if family == "efficientnms"
+                else source_onnx)
     engines = {}
     for precision, flags in (("FP32", []), ("FP16", ["--fp16"])):
         name = f"raw-{precision.lower()}"
@@ -452,7 +466,7 @@ def prepare_and_run(source_onnx, output_dir, *, trtexec=DEFAULT_TRTEXEC,
         engines[f"TensorRT {precision}"] = engine
     return run_benchmark(raw_onnx, engines, output_dir, source_onnx=source_onnx,
                          deployment_engine=deployment_engine, trtexec=trtexec,
-                         workspace_mib=workspace_mib)
+                         workspace_mib=workspace_mib, family=family)
 
 
 def parse_engine(value):
@@ -469,12 +483,14 @@ def main(argv=None):
     raw.add_argument("source")
     raw.add_argument("destination")
     all_steps = commands.add_parser("all", help="prepare the graph, build both engines and measure")
-    all_steps.add_argument("--onnx", required=True, help="original deployment ONNX (never modified)")
+    all_steps.add_argument("--flavor", help="flavor id (default: the packaged flavor)")
+    all_steps.add_argument("--onnx", help="ONNX graph (default: tmp/export/FLAVOR/ from export_model.py)")
     all_steps.add_argument("--output", required=True, help="new or empty directory for this run")
     all_steps.add_argument("--deployment-engine", help="deployment engine, recorded by hash")
     all_steps.add_argument("--trtexec", default=DEFAULT_TRTEXEC)
     all_steps.add_argument("--workspace-mib", type=int, default=1024)
     bench = commands.add_parser("run", help="measure ONNX Runtime and the TensorRT engines")
+    bench.add_argument("--flavor", help="flavor id (default: the packaged flavor)")
     bench.add_argument("--onnx", required=True, help="NMS-free ONNX graph (from raw-onnx)")
     bench.add_argument("--engine", action="append", type=parse_engine, required=True,
                        help="LABEL=PATH of a TensorRT engine built from --onnx (repeatable)")
@@ -488,17 +504,18 @@ def main(argv=None):
     if args.command == "raw-onnx":
         make_raw_onnx(args.source, args.destination)
         return 0
+    flavor = flavors.load(ROOT, args.flavor or flavors.active_id(ROOT))
     if args.command == "all":
-        report = prepare_and_run(args.onnx, args.output, trtexec=args.trtexec,
-                                 workspace_mib=args.workspace_mib,
-                                 deployment_engine=args.deployment_engine)
+        report = prepare_and_run(args.onnx or flavors.onnx_path(ROOT, flavor), args.output,
+                                 trtexec=args.trtexec, workspace_mib=args.workspace_mib,
+                                 deployment_engine=args.deployment_engine, family=flavor["family"])
     else:
         engines = dict(args.engine)
         assert len(engines) == len(args.engine), "engine labels must be unique"
         assert ORT_LABEL not in engines, f"'{ORT_LABEL}' is reserved for the reference"
         report = run_benchmark(args.onnx, engines, args.output, source_onnx=args.source_onnx,
                                deployment_engine=args.deployment_engine, trtexec=args.trtexec,
-                               workspace_mib=args.workspace_mib)
+                               workspace_mib=args.workspace_mib, family=flavor["family"])
     print()
     print(markdown_table(report))
     print("\nOutput differences versus ONNX Runtime (not an accuracy score):")
