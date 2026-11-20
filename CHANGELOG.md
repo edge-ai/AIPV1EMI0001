@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- docs: Show every recorded result in the comparison notebook as text, so GitHub displays it without running code: accuracy, inference time, live camera counts with and without video outputs, output settings, what was not tested, and when each test ran
+- docs: Add 80-class mAP, inference time and camera counts with all video outputs to the README results table, with the test dates
+- docs: Explain that the three flavors are build recipes for one AI Processor and that the top-level `configs/` and `models/` hold the selected flavor
+- docs: Replace the Mermaid diagrams, which GitHub doesn't render in notebooks, with an SVG pipeline diagram and a one-line build flow
+- test: Generate the published camera, headroom and output-screening tables from `capacity.jsonl` and check that the README and the comparison notebook quote them
+
 ## v7.0.0 - 2026-11-17
 
 - feat!: Support three interchangeable detector flavors, YOLOv7-tiny, YOLOv10n and YOLO26n, each in its own `flavors/<id>/` folder; `python3 tools/flavors.py use <id>` selects the one the package carries (`manifest.json`, `store.json`, the inference config, `config.pbtxt` and `LICENSE.weights` follow). The default is YOLO26n

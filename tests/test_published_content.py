@@ -1,10 +1,14 @@
+import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import types
 import unittest
+from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "tests"))
 
+import capacity  # noqa: E402
 import compare_models  # noqa: E402
 import flavors  # noqa: E402
 from public_reference import assert_no_private_references  # noqa: E402
@@ -33,6 +38,23 @@ def markdown(name):
     return "\n".join(source(cell) for cell in notebook(name)["cells"] if cell["cell_type"] == "markdown")
 
 
+def table_rows(table):
+    return [[cell.strip() for cell in line.strip().strip("|").split("|")]
+            for line in table.splitlines()[2:] if line.startswith("| ")]
+
+
+def day(stamp):
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone(timezone.utc).date()
+
+
+def span(days):
+    first, last = min(days), max(days)
+    if first == last:
+        return f"{first.day} {first:%B %Y}"
+    assert (first.year, first.month) == (last.year, last.month), "spans across months are not worded yet"
+    return f"{first.day} to {last.day} {last:%B %Y}"
+
+
 class PublishedContentTests(unittest.TestCase):
     """The overview points to the lessons; the comparison quotes the committed measurements."""
 
@@ -51,6 +73,22 @@ class PublishedContentTests(unittest.TestCase):
         self.assertIn(f"({(RESULTS / 'capacity.md').relative_to(ROOT)})", readme)
         for marker in ("TBD", "DRAFT", "TODO"):
             self.assertNotIn(marker, readme)
+
+    def test_the_readme_quotes_the_recorded_results(self):
+        readme = (ROOT / "README.md").read_text()
+        records = capacity.load(RESULTS / "capacity.jsonl")
+        models = [entry["flavor"]["id"] for entry in self.entries]
+        summary = table_rows(compare_models.summary_table(self.entries))
+        cameras = table_rows(capacity.camera_table(records, models))
+        for model, accuracy, counts in zip(models, summary, cameras):
+            with self.subTest(model=model):
+                row = next(line for line in readme.splitlines()
+                           if line.startswith("| [") and f"(notebooks/{BUILD[model]})" in line)
+                counts = [count.rstrip("†") for count in counts[1:]]
+                # The caption says outputs and 1080p cameras gave the same counts.
+                self.assertEqual(len(set(counts)), 1, counts)
+                self.assertEqual(table_rows(f"|\n|\n{row}")[0][1:], [*accuracy[1:4], counts[0], counts[2]])
+        self.assertNotIn("yolov7", re.sub(r"\]\([^)]*\)", "]", readme).lower())
 
     def test_the_presentation_is_read_only(self):
         presentation = notebook("00-presentation.ipynb")
@@ -110,9 +148,16 @@ class PublishedContentTests(unittest.TestCase):
 
 
 class ComparisonNotebookTests(unittest.TestCase):
-    """The read-only cells of the comparison notebook run anywhere and show the recorded tables."""
+    """The comparison notebook shows the recorded results as text; only the optional re-measure cells run code."""
 
-    def run_cells(self, cell_ids):
+    @classmethod
+    def setUpClass(cls):
+        cls.entries = compare_models.collect(RESULTS, ROOT)
+        cls.records = capacity.load(RESULTS / "capacity.jsonl")
+        cls.models = [entry["flavor"]["id"] for entry in cls.entries]
+        cls.text = markdown("04-compare-models.ipynb")
+
+    def run_cells(self, cell_ids, directory):
         shown = []
         stub = types.ModuleType("IPython.display")
         stub.Markdown = lambda text: ("markdown", text)
@@ -122,42 +167,69 @@ class ComparisonNotebookTests(unittest.TestCase):
         package.display = stub
         cells = {cell["id"]: source(cell) for cell in notebook("04-compare-models.ipynb")["cells"]
                  if cell["cell_type"] == "code"}
-        previous_directory, previous_path = os.getcwd(), list(sys.path)
-        os.chdir(NOTEBOOKS)
+        previous_directory = os.getcwd()
+        os.chdir(directory)
         try:
-            with patch.dict(sys.modules, {"IPython": package, "IPython.display": stub}):
+            with patch.dict(sys.modules, {"IPython": package, "IPython.display": stub}), \
+                    patch.dict(os.environ), redirect_stdout(io.StringIO()) as printed:
                 namespace = {}
                 for cell_id in cell_ids:
                     exec(compile(cells[cell_id], cell_id, "exec"), namespace)
+                environment, working_directory = dict(os.environ), Path.cwd()
         finally:
             os.chdir(previous_directory)
-            sys.path[:] = previous_path
-        return shown, namespace
+        return shown, printed.getvalue(), environment, working_directory
 
-    def test_the_tables_are_the_ones_rendered_from_the_recorded_results(self):
-        entries = compare_models.collect(RESULTS, ROOT)
-        shown, namespace = self.run_cells(["load"])
-        self.assertEqual(shown, [])
-        self.assertEqual([entry["flavor"]["id"] for entry in namespace["entries"]], [e["flavor"]["id"] for e in entries])
+    def test_every_recorded_table_is_quoted(self):
+        expected = {"accuracy": compare_models.accuracy_table(self.entries),
+                    "latency": compare_models.latency_table(self.entries),
+                    "precision": compare_models.precision_table(self.entries),
+                    "parity": compare_models.parity_table(self.entries),
+                    "cameras": capacity.camera_table(self.records, self.models),
+                    "headroom": capacity.headroom_table(self.records, self.models),
+                    "screening": capacity.screening_table(self.records)}
+        for name, table in expected.items():
+            with self.subTest(table=name):
+                self.assertIn(table, self.text)
+        self.assertIn(f"]({os.path.relpath(RESULTS / 'comparison.png', NOTEBOOKS)})", self.text)
 
-    def test_each_table_cell_displays_the_matching_table(self):
-        entries = compare_models.collect(RESULTS, ROOT)
-        notebook_cells = notebook("04-compare-models.ipynb")["cells"]
-        expected = {"accuracy_table": compare_models.accuracy_table(entries),
-                    "latency_table": compare_models.latency_table(entries),
-                    "parity_table": compare_models.parity_table(entries)}
-        for table, text in expected.items():
-            cell = next(cell for cell in notebook_cells if cell["cell_type"] == "code" and f"compare_models.{table}" in source(cell))
-            with self.subTest(table=table):
-                shown, _ = self.run_cells(["load", cell["id"]])
-                self.assertIn(("markdown", text), shown)
+    def test_the_measurement_dates_come_from_the_evidence(self):
+        accuracy = {day(json.loads(path.read_text())["utc"]) for path in RESULTS.glob("*-accuracy.json")}
+        latency = {day(json.loads(path.read_text())["utc"]) for path in RESULTS.glob("*-latency.json")}
+        trials = [row["trial"] if row["kind"] == "fixed" else row for row in self.records
+                  if row["kind"] in ("trial", "fixed")]
+        cameras = {day(attempt["started"]) for trial in trials for attempt in (trial.get("attempts") or [trial])}
+        checks = json.loads((RESULTS / "capacity-outputs.json").read_text())["checks"]
+        outputs = {day(check["probe"]["t"]) for check in checks}
+        for text in (f"| Accuracy | {span(accuracy)} |", f"| Inference time | {span(latency)} |",
+                     f"| Camera capacity | {span(cameras)} | {len(trials)} live RTSP trials",
+                     f"| Output checks | {span(outputs)} | {len(checks)} YOLO26n output diagnostics |",
+                     f"measured from {span(accuracy | latency | cameras | outputs)}"):
+            with self.subTest(text=text):
+                self.assertIn(text, self.text)
 
-    def test_the_chart_cell_points_to_the_recorded_image(self):
-        notebook_cells = notebook("04-compare-models.ipynb")["cells"]
-        cell = next(cell for cell in notebook_cells if cell["cell_type"] == "code" and "comparison.png" in source(cell))
-        shown, _ = self.run_cells(["load", cell["id"]])
-        self.assertEqual([kind for kind, _ in shown], ["image"])
-        self.assertTrue(Path(shown[0][1]).is_file())
+    def test_only_the_optional_cells_run_code_and_they_find_the_repository(self):
+        cells = notebook("04-compare-models.ipynb")["cells"]
+        ids = [cell["id"] for cell in cells]
+        first_code = next(index for index, cell in enumerate(cells) if cell["cell_type"] == "code")
+        self.assertGreater(first_code, ids.index("remeasure-intro"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "tools").mkdir()
+            (root / "tools/compare_models.py").write_text("")
+            (root / "notebooks").mkdir()
+            shown, printed, environment, working_directory = self.run_cells(
+                ["measure-switch", "show-own"], root / "notebooks")
+            self.assertEqual(working_directory, root)
+            self.assertEqual(environment["MEASURE"], "0")
+            self.assertEqual(shown, [])
+            self.assertIn("No report in tmp/benchmarks", printed)
+            own = root / "tmp/benchmarks"
+            own.mkdir(parents=True)
+            (own / "comparison.md").write_text("| own table |")
+            (own / "comparison.png").write_bytes(b"png")
+            shown, _, _, _ = self.run_cells(["measure-switch", "show-own"], root / "notebooks")
+            self.assertEqual(shown, [("markdown", "| own table |"), ("image", "tmp/benchmarks/comparison.png")])
 
     def test_the_measure_cells_do_nothing_unless_asked(self):
         for cell in notebook("04-compare-models.ipynb")["cells"]:

@@ -124,9 +124,14 @@ class NotebookStructureTests(unittest.TestCase):
                     self.assertTrue((ROOT / reference).exists(), reference)
 
     def test_markdown_explains_the_pipeline_with_diagrams(self):
-        for name in (PRESENTATION, *BUILD.values()):
+        # GitHub's notebook viewer shows Mermaid source as plain text.
+        for name, notebook in NB.items():
             with self.subTest(notebook=name):
-                self.assertGreaterEqual(NB[name].markdown.count("```mermaid"), 1)
+                self.assertNotIn("```mermaid", notebook.markdown)
+        self.assertIn("](../doc/assets/aip-pipeline.svg)", NB[PRESENTATION].markdown)
+        for name in BUILD.values():
+            with self.subTest(notebook=name):
+                self.assertIn("Weights → ONNX graph → TensorRT engine → AIP archive → Video test", NB[name].markdown)
         build = "\n".join(NB[name].markdown for name in BUILD.values())
         for topic in ("nvinferserver", "NvDCF", "callback.py", ".include", "EAIS Tools"):
             self.assertIn(topic, build)
