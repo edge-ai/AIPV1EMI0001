@@ -38,6 +38,11 @@ These are raw model times, not DeepStream pipeline throughput or a matched compa
 The full tables, with the chart and the method, are in [`doc/benchmarks/orin-nx-16gb-jp6.0/comparison.md`](doc/benchmarks/orin-nx-16gb-jp6.0/comparison.md).
 [`04-compare-models`](notebooks/04-compare-models.ipynb) explains how to read them and how to repeat the measurement on your own station.
 
+[RTSP camera-capacity measurements](doc/benchmarks/orin-nx-16gb-jp6.0/capacity.md) reached **7 / 6 / 4 cameras**
+for YOLO26n / YOLOv10n / YOLOv7-tiny in the three tested 720p output profiles (at least 29 processed FPS per camera).
+The report distinguishes measured and inferred configurations and documents a single-camera WebRTC/recording failure
+on the tested development build; these are not deployment guarantees.
+
 ## Quick start
 
 On the station, open the **App-Builder** (Jupyter) terminal:
