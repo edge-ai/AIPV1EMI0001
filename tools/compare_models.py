@@ -76,7 +76,7 @@ def percent(value):
 
 
 def summary_table(entries):
-    """The compact table of the README: accuracy, and TensorRT FP16 time per image at the smallest and largest batch."""
+    """The comparison notebook's compact table: accuracy and FP16 time per image at the smallest and largest batch."""
     batches = sorted({item["batch"] for entry in entries for item in entry["latency"]["results"]})
     small, large = batches[0], batches[-1]
     lines = [f"| Model | mAP 50:95, 80 classes (published) | mAP 50:95, car / person / truck "

@@ -18,7 +18,10 @@
     },
     "onnx": "yolov10n.onnx",
     "engine": "yolov10-fp16-1x8x8.engine",
-    "engine_asset": {"url": null, "sha256": null},
+    "engine_asset": {
+        "url": "https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/ae3bd8c672013b3bb04a9af262130dcbaa41a109/orin-nx-16gb-jp6.0/yolov10-fp16-1x8x8.engine",
+        "sha256": "8add86b6a31ec672381cf5b23d56f62c8cfcb0f30812d1591d039cc67300c85f"
+    },
     "infer_config": "config_infer_primary_detector_yolov10.txt",
     "parser_function": "NvDsInferParseYoloEndToEnd",
     "outputs": [

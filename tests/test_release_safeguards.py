@@ -24,6 +24,21 @@ class ReleaseSafeguardsTests(unittest.TestCase):
                     self.assertTrue(asset["url"].startswith("https://"))
                     self.assertRegex(asset["sha256"], r"^[0-9a-f]{64}$")
 
+    def test_every_v7_flavor_pins_the_camera_test_deployment_engine(self):
+        expected = {
+            "yolo26": "0cb26f248c60759893471f9966d293b62faa812a7d98bd69183d0c99a7f96802",
+            "yolov10": "8add86b6a31ec672381cf5b23d56f62c8cfcb0f30812d1591d039cc67300c85f",
+            "yolov7": "c9da0f95ec3f10cc2d5cd213dbfc364a932478a4e884b1d873cf69919842fa5c",
+        }
+        revision = "ae3bd8c672013b3bb04a9af262130dcbaa41a109"
+        for flavor_id, sha256 in expected.items():
+            flavor = flavors.load(ROOT, flavor_id)
+            asset = flavor["engine_asset"]
+            with self.subTest(flavor=flavor_id):
+                self.assertEqual(asset["sha256"], sha256)
+                self.assertIn(f"/resolve/{revision}/orin-nx-16gb-jp6.0/{flavor['engine']}", asset["url"])
+                self.assertNotIn("/resolve/main/", asset["url"])
+
     def test_release_takes_the_engine_of_the_active_flavor_and_verifies_it(self):
         self.assertIn("python3 tools/flavors.py check", RELEASE)
         self.assertIn("engine_asset.url", RELEASE)

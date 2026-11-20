@@ -137,7 +137,7 @@ class NotebookStructureTests(unittest.TestCase):
     def test_documented_node_red_version_matches_project(self):
         package = json.loads((ROOT / "logic/package.json").read_text())
         version = package["dependencies"]["@edgematrix/node-red-contrib-eais"]
-        for name in ("README.md", "logic/README.md", "doc/USER_MANUAL.md"):
+        for name in ("logic/README.md", "doc/USER_MANUAL.md"):
             with self.subTest(document=name):
                 self.assertIn(version, (ROOT / name).read_text())
 
@@ -348,14 +348,23 @@ class BuildNotebookBehaviourTests(unittest.TestCase):
                 self.assertFalse((station.root / "AIPV1EMI0001_dist.tgz").exists())
 
     def test_scan_registers_only_the_target_without_forcing(self):
-        aip = {"pk": "aip-pk", "unique_id": "AIPV1EMI0001", "version": AIP_VERSION}
-        for flavor_id, station in self.each_flavor({"AIPV1EMI0001": aip, "aiprocessors": [aip]}):
-            (station.root / "manifest.json").write_text(json.dumps({"version": AIP_VERSION}))
+        for flavor_id, station in self.each_flavor({"AIPV1EMI0001": {}}):
+            primary = {"model": flavors.load(ROOT, flavor_id)["display_name"]}
+            aip = {"pk": "aip-pk", "unique_id": "AIPV1EMI0001", "version": AIP_VERSION,
+                   "primary_processor": primary}
+            (station.root / "manifest.json").write_text(json.dumps(aip))
+            (station.fixtures / "aiprocessors.json").write_text(json.dumps([aip]))
             result = self.run_cell(station, flavor_id, "scan")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(station.log(), [
                 "curl -fsS -X POST http://ms3/aiprocessor/scan/AIPV1EMI0001?force=false",
                 "curl -fsS http://ms3/aiprocessors"])
+
+            other = {**aip, "primary_processor": {"model": "other detector"}}
+            (station.fixtures / "aiprocessors.json").write_text(json.dumps([other]))
+            result = self.run_cell(station, flavor_id, "scan")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Registered detector does not match", result.stderr)
 
     def test_scan_stops_when_the_target_scan_fails(self):
         for flavor_id, station in self.each_flavor({"aiprocessors": []}):
@@ -408,11 +417,13 @@ class BuildNotebookBehaviourTests(unittest.TestCase):
 
     def test_callback_acceptance(self):
         counts = lambda value: {
+            "available": value is not None,
             "obj_counter": {name: {"max_val": value} for name in ("car", "person", "truck")},
-            "analytics_obj_cnt": {"objInROIcnt": {}, "objLCCurrCnt": {}},
+            "analytics_obj_cnt": {"objInROIcnt": {}, "objLCCurrCnt": {}, "objLCCumCnt": {}},
         }
         record = lambda value: {"since": 1, "until": 2, "data": {"0": counts(value)}}
-        cases = {"": False, "[]": False, json.dumps([record(0)]): False,
+        cases = {"": False, "[]": False, json.dumps([record(0)]): False, json.dumps([record(None)]): False,
+                 json.dumps([record(None), record(2)]): True,
                  json.dumps([record(0)]) + "\n" + json.dumps([record(2)]): True}
         manifest = json.loads((ROOT / "manifest.json").read_text())
         for name in BUILD.values():

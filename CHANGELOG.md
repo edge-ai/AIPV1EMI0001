@@ -13,8 +13,10 @@
 - docs: Rewrite the README as a short introduction; move the build, measurement and accuracy steps into the notebooks
 - docs: Replace the YOLOv7 reference benchmark with one latency and one accuracy result per flavor in `doc/benchmarks/orin-nx-16gb-jp6.0/`, with a comparison table and chart
 - docs: Remeasure latency on 2026-11-18 with the video pipeline stopped and rebuilt engines; record idle GPU baselines and alternating-engine checks, preserve the previous contention timings, and keep the earlier accuracy evaluation separate
+- docs: Publish SHA-256-verified v7.0.0 TensorRT FP16 engines for all three model flavors from the Orin NX capacity tests; pin each immutable Hugging Face URL and checksum for release packaging
+- docs: Replace the single-model hero illustration with a multi-model AIP image
 - docs: Remove the conference-specific wording from the notebooks
-- ci: Publish the engine of the default flavor from its `engine_asset`; the release stops until that flavor's engine is published
+- ci: Download and verify the active flavor's prebuilt engine from `engine_asset` when packaging a release; the release stops until that engine is published
 - test: Cover flavors, the build script, the parser and the notebooks, and check that the README and the notebooks quote the published measurements
 
 ## v6.1.0 - 2026-11-10

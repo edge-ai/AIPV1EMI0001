@@ -34,7 +34,7 @@ def markdown(name):
 
 
 class PublishedContentTests(unittest.TestCase):
-    """The README and the notebooks quote the committed station measurements, and nothing else."""
+    """The overview points to the lessons; the comparison quotes the committed measurements."""
 
     @classmethod
     def setUpClass(cls):
@@ -44,16 +44,20 @@ class PublishedContentTests(unittest.TestCase):
     def test_every_flavor_has_recorded_measurements(self):
         self.assertEqual({entry["flavor"]["id"] for entry in self.entries}, set(flavors.flavor_ids(ROOT)))
 
-    def test_the_readme_shows_the_recorded_summary_table(self):
+    def test_the_readme_links_each_lesson_and_the_camera_report(self):
         readme = (ROOT / "README.md").read_text()
-        self.assertIn(compare_models.summary_table(self.entries), readme)
+        for name in (*BUILD.values(), "00-presentation.ipynb", "04-compare-models.ipynb"):
+            self.assertIn(f"(notebooks/{name})", readme)
+        self.assertIn(f"({(RESULTS / 'capacity.md').relative_to(ROOT)})", readme)
         for marker in ("TBD", "DRAFT", "TODO"):
             self.assertNotIn(marker, readme)
 
-    def test_the_presentation_reads_only_and_quotes_the_recorded_table(self):
+    def test_the_presentation_is_read_only(self):
         presentation = notebook("00-presentation.ipynb")
         self.assertFalse([cell for cell in presentation["cells"] if cell["cell_type"] == "code"])
-        self.assertIn(compare_models.summary_table(self.entries), markdown("00-presentation.ipynb"))
+
+    def test_the_recorded_summary_is_visible_without_running_the_comparison(self):
+        self.assertIn(compare_models.summary_table(self.entries), markdown("04-compare-models.ipynb"))
 
     def test_no_notebook_keeps_placeholder_text(self):
         for name in (*BUILD.values(), "00-presentation.ipynb", "04-compare-models.ipynb"):
@@ -62,24 +66,17 @@ class PublishedContentTests(unittest.TestCase):
                 for marker in ("DRAFT", "TBD", "TODO"):
                     self.assertNotIn(marker, text)
 
-    def test_each_build_notebook_quotes_the_numbers_of_its_own_flavor(self):
+    def test_each_build_explains_the_outputs_its_parser_expects(self):
         for flavor_id, name in BUILD.items():
-            entry = self.by_id[flavor_id]
-            metrics = compare_models.accuracy_row(entry)["metrics"]
-            text = markdown(name)
+            flavor = self.by_id[flavor_id]["flavor"]
             with self.subTest(flavor=flavor_id):
-                self.assertIn(f"**{100 * metrics['map_50_95']:.2f}** mAP 50:95", text)
-                self.assertIn(f"**{100 * metrics['aip_map_50_95']:.2f}** over the three classes", text)
-                batch1 = compare_models.row(entry["latency"], compare_models.TENSORRT_FP16, 1)["ms_per_image"]
-                batch8 = compare_models.row(entry["latency"], compare_models.TENSORRT_FP16, 8)["ms_per_image"]
-                self.assertIn(f"{batch1:.1f} ms per image at batch 1 and {batch8:.1f} ms at batch 8", text)
-                for other_id, other in self.by_id.items():
-                    if other_id != flavor_id:
-                        other_metrics = compare_models.accuracy_row(other)["metrics"]
-                        self.assertNotIn(f"**{100 * other_metrics['map_50_95']:.2f}** mAP 50:95", text)
+                text = markdown(name)
+                self.assertIn(f"`{flavor['parser_function']}`", text)
+                for output in flavor["outputs"]:
+                    self.assertIn(f"`{output['name']}`", text)
 
     def test_the_metric_claim_holds_for_the_flavors_with_a_published_figure(self):
-        # The README and notebooks claim agreement within 0.2 mAP points.
+        # The comparison notebook claims agreement within 0.2 mAP points.
         checked = 0
         for entry in self.entries:
             published = entry["flavor"]["reference"]["coco_map50_95"]
