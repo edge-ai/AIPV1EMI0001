@@ -14,8 +14,8 @@ time.
 
 ## Product Purpose
 
-AIPV1EMI0001 is a self-contained AI Processor vertical for real-time YOLOv7
-object detection. Its bundled Node-RED logic and dashboard make the live video
+AIPV1EMI0001 is a self-contained AI Processor vertical for real-time YOLO
+object detection (YOLOv7-tiny, YOLOv10n or YOLO26n, selected when the package is built). Its bundled Node-RED logic and dashboard make the live video
 stream, class counts, ROI counts, and line-crossing counts directly observable
 from the station web UI.
 

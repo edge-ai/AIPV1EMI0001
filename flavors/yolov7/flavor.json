@@ -1,0 +1,42 @@
+{
+    "id": "yolov7",
+    "display_name": "YOLOv7-tiny",
+    "description": "General YOLOv7-tiny object detector (car, person, truck)",
+    "license": "Apache-2.0 AND GPL-3.0-only",
+    "weights_license": "licenses/GPL-3.0.txt",
+    "family": "efficientnms",
+    "weights": {
+        "file": "yolov7-tiny.pt",
+        "url": "https://github.com/WongKinYiu/yolov7/releases/download/v0.1/yolov7-tiny.pt",
+        "sha256": "0fa1423606133c06362ec716029dade1169d5631e83195b75d8efa66d2ee0b77"
+    },
+    "exporter": {
+        "kind": "yolov7",
+        "repository": "https://github.com/WongKinYiu/yolov7",
+        "commit": "a207844b1ce82d204ab36d87d496728d3d2348e7",
+        "arguments": [
+            "--grid", "--end2end", "--simplify", "--dynamic-batch",
+            "--topk-all", "100", "--iou-thres", "0.65", "--conf-thres", "0.35",
+            "--img-size", "640", "640"
+        ]
+    },
+    "onnx": "yolov7-tiny.onnx",
+    "engine": "yolov7-fp16-1x8x8.engine",
+    "engine_asset": {
+        "url": "https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/ae3bd8c672013b3bb04a9af262130dcbaa41a109/orin-nx-16gb-jp6.0/yolov7-fp16-1x8x8.engine",
+        "sha256": "c9da0f95ec3f10cc2d5cd213dbfc364a932478a4e884b1d873cf69919842fa5c"
+    },
+    "infer_config": "config_infer_primary_detector_yolov7.txt",
+    "parser_function": "NvDsInferParseCustomEfficientNMS",
+    "outputs": [
+        {"name": "num_dets", "dtype": "int32", "dims": [1]},
+        {"name": "det_boxes", "dtype": "float32", "dims": [100, 4]},
+        {"name": "det_scores", "dtype": "float32", "dims": [100]},
+        {"name": "det_classes", "dtype": "int32", "dims": [100]}
+    ],
+    "reference": {
+        "coco_map50_95": null,
+        "note": "No official COCO val2017 figure at 640 px for these weights. The YOLOv7 paper gives 35.2 AP on val2017 at 416 px for YOLOv7-tiny, and 38.7 at 640 px only for the different YOLOv7-tiny-SiLU model; neither is comparable.",
+        "url": "https://arxiv.org/abs/2207.02696"
+    }
+}

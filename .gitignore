@@ -4,3 +4,8 @@ tmp/
 logic/flows_cred.json
 **/.ipynb_checkpoints/
 src/nvdsinfer_customparser/libnvds_infercustomparser.so
+*.onnx
+*.pt
+*.engine
+*.cache
+models/*/libnvds_infercustomparser.so

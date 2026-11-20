@@ -1,7 +1,7 @@
 {
     "unique_id": "AIPV1EMI0001",
-    "name": "Yolov7 tiny",
-    "description": "General Yolov7 tiny model",
+    "name": "YOLO26n",
+    "description": "General YOLO26n object detector (car, person, truck)",
     "vendor": {
         "name": "Edgematrix",
         "website": "https://edgematrix.com"

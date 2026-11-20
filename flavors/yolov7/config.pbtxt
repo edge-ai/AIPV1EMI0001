@@ -1,0 +1,42 @@
+name: "AIPV1EMI0001_Yolo_Detector"
+platform: "tensorrt_plan"
+max_batch_size: 8
+dynamic_batching { }
+default_model_filename: "yolov7-fp16-1x8x8.engine"
+input [
+  {
+    name: "images"
+    data_type: TYPE_FP32
+    dims: [ 3, 640, 640 ]
+  }
+]
+output [
+  {
+    name: "num_dets"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  },
+  {
+    name: "det_boxes"
+    data_type: TYPE_FP32
+    dims: [ 100, 4 ]
+    label_filename: "labels-rev3.txt"
+  },
+  {
+    name: "det_scores"
+    data_type: TYPE_FP32
+    dims: [ 100 ]
+  },
+  {
+    name: "det_classes"
+    data_type: TYPE_INT32
+    dims: [ 100 ]
+  }
+]
+instance_group [
+  {
+    kind: KIND_GPU
+    count: 1
+    gpus: 0
+  }
+]

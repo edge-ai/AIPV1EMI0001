@@ -1,5 +1,24 @@
 # Changelog
 
+## v7.0.0 - 2026-11-17
+
+- feat!: Support three interchangeable detector flavors, YOLOv7-tiny, YOLOv10n and YOLO26n, each in its own `flavors/<id>/` folder; `python3 tools/flavors.py use <id>` selects the one the package carries (`manifest.json`, `store.json`, the inference config, `config.pbtxt` and `LICENSE.weights` follow). The default is YOLO26n
+- feat!: Replace the custom Hugging Face weights with the publishers' official COCO weights, fetched from pinned URLs and verified by SHA-256 in `tools/export_model.py`. The classes are unchanged: COCO `car`, `person` and `truck`
+- fix: The earlier 12.64% COCO mAP 50:95 came from custom three-class weights scored against COCO labels, not from the evaluation, which reproduces the published figures for YOLO26n (Ultralytics, end-to-end head) and YOLOv10n (YOLOv10 paper) to within 0.2 points. The official weights score about 37 to 40 on the full COCO validation set (80 classes) and about 39 to 41 on the three AI Processor classes
+- feat: Add `NvDsInferParseYoloEndToEnd` for the NMS-free YOLOv10 and YOLO26 output and extend the shared parser to map COCO class ids to the AI Processor classes; test both parsers with a stubbed DeepStream header
+- feat: Build the parser and the TensorRT engine of any flavor with `bin/build.sh <flavor>`
+- feat: Add `tools/measure.py` to measure latency and COCO accuracy of a flavor on a station and publish the results, and `tools/compare_models.py` to compare the measured flavors
+- feat: Make `tools/benchmark.py` and `tools/accuracy.py` flavor-aware; report mAP 50:95, the metric Ultralytics uses, with per-class values for the three classes
+- docs!: Replace `localdev.ipynb`, `presentation.ipynb` and `accuracy.ipynb` with `notebooks/`: a presentation, one build notebook per flavor, and a model comparison. Each notebook credits its author
+- docs: Rewrite the README as a short introduction; move the build, measurement and accuracy steps into the notebooks
+- docs: Replace the YOLOv7 reference benchmark with one latency and one accuracy result per flavor in `doc/benchmarks/orin-nx-16gb-jp6.0/`, with a comparison table and chart
+- docs: Remeasure latency on 2026-11-18 with the video pipeline stopped and rebuilt engines; record idle GPU baselines and alternating-engine checks, preserve the previous contention timings, and keep the earlier accuracy evaluation separate
+- docs: Publish SHA-256-verified v7.0.0 TensorRT FP16 engines for all three model flavors from the Orin NX capacity tests; pin each immutable Hugging Face URL and checksum for release packaging
+- docs: Replace the single-model hero illustration with a multi-model AIP image
+- docs: Remove the conference-specific wording from the notebooks
+- ci: Download and verify the active flavor's prebuilt engine from `engine_asset` when packaging a release; the release stops until that engine is published
+- test: Cover flavors, the build script, the parser and the notebooks, and check that the README and the notebooks quote the published measurements
+
 ## v6.1.0 - 2026-11-10
 
 - docs: Rewrite `localdev.ipynb` as a command-first build guide based on `eais-tools`, with a build sequence diagram; keep architecture explanations in the presentation

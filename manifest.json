@@ -1,30 +1,30 @@
 {
     "unique_id": "AIPV1EMI0001",
-    "name": "Yolov7 tiny",
-    "version": "6.1.0",
+    "name": "YOLO26n",
+    "version": "7.0.0",
     "hardware_target": [
         "EX3",
         "EX5",
         "EX7"
     ],
-    "description": "General Yolov7 tiny model",
+    "description": "General YOLO26n object detector (car, person, truck)",
     "vendor": {
         "name": "Edgematrix",
         "website": "https://edgematrix.com"
     },
-    "license": "Apache-2.0 AND GPL-3.0-only",
+    "license": "Apache-2.0 AND AGPL-3.0-only",
     "maximum_input_streams": 8,
     "user_manual": "https://github.com/edge-ai/AIPV1EMI0001/blob/main/doc/USER_MANUAL.md",
     "primary_processor": {
         "name": "AIPV1EMI0001_Yolo_Detector",
         "description": "Detection of several generic object classes",
-        "model": "Yolov7",
+        "model": "YOLO26n",
         "classes": [
             "car",
             "person",
             "truck"
         ],
-        "config_plan": "config_infer_primary_detector_yolov7.txt",
+        "config_plan": "config_infer_primary_detector_yolo26.txt",
         "batch_size": 8
     },
     "secondary_processors": [],

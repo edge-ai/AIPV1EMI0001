@@ -4,11 +4,12 @@
     python3 tools/check_package.py                       # check dist/ against the sources
     python3 tools/check_package.py --archive AIPV1EMI0001_dist.tgz
 
-The expected set is what EAIS Tools 0.9.2 copies by itself (EAIS_FILES) plus every
-file listed in .include. A missing, unexpected or modified file is an error, so
+The expected set is what EAIS Tools 0.9.2 copies by itself (EAIS_FILES plus the
+config and engine of the active flavor, see tools/flavors.py) plus every file
+listed in .include. A missing, unexpected or modified file is an error, so
 source models, credentials, node_modules or caches can never ship unnoticed.
 This is a release CI safeguard, not a prerequisite for the native EAIS Tools
-build/export workflow in localdev.ipynb.
+build/export workflow in the build notebooks.
 """
 import argparse
 import hashlib
@@ -16,15 +17,24 @@ import sys
 import tarfile
 from pathlib import Path, PurePosixPath
 
+import flavors
+
+MODEL_DIR = flavors.MODEL_DIR
+
 EAIS_FILES = {
     "manifest.json", "callback.py", "README.md", "CHANGELOG.md", "DESIGN.md", "PRODUCT.md",
     "resources/logo.png",
-    "configs/config_infer_primary_detector_yolov7.txt", "configs/config_tracker_NvDCF_perf.yml",
-    "models/AIPV1EMI0001_Yolo_Detector/config.pbtxt",
-    "models/AIPV1EMI0001_Yolo_Detector/labels-rev3.txt",
-    "models/AIPV1EMI0001_Yolo_Detector/libnvds_infercustomparser.so",
-    "models/AIPV1EMI0001_Yolo_Detector/1/yolov7-fp16-1x8x8.engine",
+    "configs/config_tracker_NvDCF_perf.yml",
+    f"{MODEL_DIR}/config.pbtxt",
+    f"{MODEL_DIR}/labels-rev3.txt",
+    f"{MODEL_DIR}/libnvds_infercustomparser.so",
 }
+
+
+def eais_files(root):
+    """EAIS_FILES plus the files that belong to the active flavor, after checking it is consistent."""
+    flavor = flavors.load(root, flavors.check(root))
+    return EAIS_FILES | {f"configs/{flavor['infer_config']}", f"{MODEL_DIR}/1/{flavor['engine']}"}
 
 
 class PackageError(AssertionError):
@@ -69,7 +79,10 @@ def include_entries(root):
 def expected_hashes(root):
     """Hashes of every file the package must contain, read from the source tree."""
     root = Path(root)
-    names = EAIS_FILES | include_entries(root)
+    try:
+        names = eais_files(root) | include_entries(root)
+    except flavors.FlavorError as error:
+        raise PackageError(str(error)) from error
     if (root / "options.json").is_file():
         names.add("options.json")
     hashes = {}

@@ -1,13 +1,17 @@
 # AIPV1EMI0001 — User Manual
 
-YOLOv7-tiny object detector for the EdgeAI Station: real-time detection of
-**`car`**, **`person`** and **`truck`** in up to 8 input streams, with ROI
-(region of interest) and LCC (line crossing counter) analytics.
+YOLO object detector for the EdgeAI Station: real-time detection of
+**`car`**, **`person`** and **`truck`**, with ROI
+(region of interest) and LCC (line crossing counter) analytics. The package
+carries one detector, chosen at build time among YOLOv7-tiny, YOLOv10n and YOLO26n;
+the [model comparison](../notebooks/04-compare-models.ipynb) explains the differences.
+The manifest allows up to 8 inputs; [measured camera capacity](benchmarks/orin-nx-16gb-jp6.0/capacity.md)
+depends on the detector, frame rate and pipeline settings.
 
 ## Requirements
 
 - EdgeAI Station (EX3 / EX5 / EX7 targets) — Jetson platforms only, x86 NVIDIA GPU hosts are not supported
-- JetPack 6 / L4T R36.3 for the prebuilt engine
+- A TensorRT engine compatible with the station GPU and runtime (see [engine files](#tensorrt-engine-files))
 - A valid AIP license on the station
 
 ## Installation
@@ -19,12 +23,13 @@ YOLOv7-tiny object detector for the EdgeAI Station: real-time detection of
 3. Create a pipeline that uses the AIP. No Triton registration is needed: inference
    runs inside the DeepStream pipeline (`nvinferserver`).
 
-To build from source instead, follow [`localdev.ipynb`](../localdev.ipynb) step by step.
+To build from source instead, follow the build notebook of the model you want, for example
+[`03-build-yolo26.ipynb`](../notebooks/03-build-yolo26.ipynb).
 
 ## Configuration
 
 No `options.json` — the detector runs with the defaults baked into
-`configs/config_infer_primary_detector_yolov7.txt` (confidence threshold 0.35, NMS IoU 0.65)
+`configs/config_infer_primary_detector_<flavor>.txt` (confidence threshold 0.35, NMS IoU 0.65)
 and `configs/config_tracker_NvDCF_perf.yml` (NvDCF tracker parameters).
 
 ## Node-RED dashboard
@@ -152,10 +157,33 @@ pipeline health separately.
 
 ## Model
 
-- Architecture: YOLOv7-tiny (WongKinYiu et al., CVPR 2023, GPL-3.0) — see README attribution
-- Integration: an EdgeAI Station adaptation exposing three object classes. The
-  trainer, training dataset, intended domain, and complete checkpoint provenance
-  have not been independently documented.
-- Artifacts: `yolov7tiny-640.onnx` with an `EfficientNMS_TRT` node, built into a TensorRT FP16 engine
-  (dynamic batch 1–8, 640×640 input)
+The package carries one detector. Every flavor is the publisher's official
+COCO-pretrained model at 640×640, exposed as three classes: COCO `car` → `car`,
+`person` → `person`, `truck` → `truck`. The other 77 COCO classes are discarded by the
+parser, so the model is a general detector for these three classes rather than a model
+trained for one scene.
+
+| Flavor | Model | Output head | Weights licence |
+|---|---|---|---|
+| `yolov7` | YOLOv7-tiny, WongKinYiu et al., CVPR 2023 | Anchors, NMS inside the ONNX graph (`EfficientNMS_TRT`) | GPL-3.0 |
+| `yolov10` | YOLOv10n, Tsinghua University, NeurIPS 2024 | NMS-free, 300 candidates | AGPL-3.0 |
+| `yolo26` | YOLO26n, Ultralytics | NMS-free, 300 candidates | AGPL-3.0 |
+
+- Engine: TensorRT FP16, dynamic batch 1–8, built on the station from the ONNX export;
+  see the build notebooks.
 - Tracker: NVIDIA NvDCF
+- Licences: see the README. The weights' licence text ships as `LICENSE.weights`.
+
+### TensorRT engine files
+
+The [Hugging Face model repository](https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/tree/ae3bd8c672013b3bb04a9af262130dcbaa41a109/orin-nx-16gb-jp6.0) provides the three **v7.0.0** TensorRT engines tested on the station. Each download is pinned to an immutable Hub commit and its checksum is recorded in the corresponding flavor configuration. EAIS Tools packages the selected `.engine` from `models/AIPV1EMI0001_Yolo_Detector/1/`.
+
+| Flavor | Deployment engine filename | SHA-256 |
+|---|---|---|---|
+| `yolo26` | [`yolo26-fp16-1x8x8.engine`](https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/ae3bd8c672013b3bb04a9af262130dcbaa41a109/orin-nx-16gb-jp6.0/yolo26-fp16-1x8x8.engine) | `0cb26f248c60759893471f9966d293b62faa812a7d98bd69183d0c99a7f96802` |
+| `yolov10` | [`yolov10-fp16-1x8x8.engine`](https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/ae3bd8c672013b3bb04a9af262130dcbaa41a109/orin-nx-16gb-jp6.0/yolov10-fp16-1x8x8.engine) | `8add86b6a31ec672381cf5b23d56f62c8cfcb0f30812d1591d039cc67300c85f` |
+| `yolov7` | [`yolov7-fp16-1x8x8.engine`](https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/ae3bd8c672013b3bb04a9af262130dcbaa41a109/orin-nx-16gb-jp6.0/yolov7-fp16-1x8x8.engine) | `c9da0f95ec3f10cc2d5cd213dbfc364a932478a4e884b1d873cf69919842fa5c` |
+
+Built for Jetson Orin NX 16 GB, JetPack 6.0 / L4T R36.3, CUDA 12.2, TensorRT 8.6.2.3 and DeepStream 7.0. Input is 640×640; batch profile is 1 / 8 / 8; FP16 is enabled, not forced on every layer. The compact anchor-based model’s engine includes EfficientNMS; the other two use NMS-free output heads. Engines are hardware- and runtime-specific; rebuild for a different target.
+
+For local builds, each model notebook still explains how to export the official COCO weights and compile an engine with `bin/build.sh`. The GitHub release workflow downloads and verifies the selected flavor’s pinned engine asset; the accuracy benchmark’s raw FP16 engines are not deployment replacements.

@@ -1,33 +1,54 @@
 Custom DeepStream bounding-box parser for AIPV1EMI0001
 =======================================================
 
-Parses the output of the YOLOv7-tiny TensorRT engine (EfficientNMS_TRT node:
-num_dets / det_boxes / det_scores / det_classes) into
-NvDsInferObjectDetectionInfo for DeepStream's nvinfer (Triton backend).
+One shared library, `libnvds_infercustomparser.so`, serves the three detector flavors.
+Each flavor is an official COCO-pretrained model with 80 classes; the AI Processor
+publishes three (`car`, `person`, `truck`, see `models/AIPV1EMI0001_Yolo_Detector/labels-rev3.txt`).
+The parser therefore maps the COCO class to the AIP class and drops everything else:
+
+    COCO person (0) -> person (1)      COCO car (2) -> car (0)      COCO truck (7) -> truck (2)
+
+It converts the model outputs into `NvDsInferObjectDetectionInfo` for DeepStream's
+`nvinferserver` (Triton backend). Boxes are in network-input pixels (640 x 640);
+DeepStream rescales them to the frame.
+
+| Function | Flavors | Model outputs |
+|---|---|---|
+| `NvDsInferParseCustomEfficientNMS` | `yolov7` | `num_dets`, `det_boxes`, `det_scores`, `det_classes` from the `EfficientNMS_TRT` plugin |
+| `NvDsInferParseYoloEndToEnd` | `yolov10`, `yolo26` | `output0` with shape `[300, 6]`, rows of `x1 y1 x2 y2 score class`; NMS-free |
+
+A function returns `false` and logs the reason when the output layers do not match what it
+expects (number of layers, layer names or shape), so a flavor wired to the wrong parser
+fails loudly instead of producing wrong boxes.
 
 Build
 -----
 
-Built automatically by bin/build.sh at the repository root:
+Built by `bin/build.sh` at the repository root, which runs `make` in this directory and copies
+the library into `models/AIPV1EMI0001_Yolo_Detector/`:
 
-    cd bin && ./build.sh
+    bin/build.sh <flavor>
 
-which runs `make` in this directory and copies the resulting
-libnvds_infercustomparser.so into models/AIPV1EMI0001_Yolo_Detector/.
-
-Requires the DeepStream headers and CUDA toolkit available in the station's
-ms3_videostreaming / ms8_jupyter containers (CUDA_VER is passed by build.sh).
+It needs the DeepStream headers and the CUDA toolkit present in the station's `ms8_jupyter`
+container (`CUDA_VER` is passed by `bin/build.sh`).
 
 Usage
 -----
 
-Referenced from configs/config_infer_primary_detector_yolov7.txt:
+Each flavor's `configs/config_infer_primary_detector_<flavor>.txt` selects its function, for example:
 
     postprocess {
       detection {
-        custom_parse_bbox_func: "NvDsInferParseCustomEfficientNMS"
+        custom_parse_bbox_func: "NvDsInferParseYoloEndToEnd"
       }
     }
     custom_lib {
       path: "../models/AIPV1EMI0001_Yolo_Detector/libnvds_infercustomparser.so"
     }
+
+Test
+----
+
+`tests/parser_stub/parser_harness.cpp` compiles the parser against a minimal stub of the DeepStream
+header and checks both functions, including malformed outputs. It runs from
+`python3 -m unittest discover -s tests` and is skipped when no C++ compiler is available.

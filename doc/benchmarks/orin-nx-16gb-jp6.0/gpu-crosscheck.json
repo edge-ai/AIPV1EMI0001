@@ -1,0 +1,228 @@
+{
+  "method": "trtexec GPU compute time only; median of five per-run medians",
+  "flags": [
+    "--warmUp=500",
+    "--duration=4",
+    "--iterations=50",
+    "--noDataTransfers"
+  ],
+  "batches": [
+    1,
+    8
+  ],
+  "rounds": 5,
+  "samples": [
+    {
+      "round": 1,
+      "flavor": "yolo26",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 5.07935
+    },
+    {
+      "round": 1,
+      "flavor": "yolov10",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 5.26929
+    },
+    {
+      "round": 1,
+      "flavor": "yolov7",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 8.12201
+    },
+    {
+      "round": 1,
+      "flavor": "yolo26",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 26.9092
+    },
+    {
+      "round": 1,
+      "flavor": "yolov10",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 29.6719
+    },
+    {
+      "round": 1,
+      "flavor": "yolov7",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 37.5386
+    },
+    {
+      "round": 2,
+      "flavor": "yolo26",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 5.09445
+    },
+    {
+      "round": 2,
+      "flavor": "yolov7",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 8.14087
+    },
+    {
+      "round": 2,
+      "flavor": "yolov10",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 5.30957
+    },
+    {
+      "round": 2,
+      "flavor": "yolo26",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 26.8809
+    },
+    {
+      "round": 2,
+      "flavor": "yolov7",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 37.4463
+    },
+    {
+      "round": 2,
+      "flavor": "yolov10",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 29.6162
+    },
+    {
+      "round": 3,
+      "flavor": "yolov7",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 8.10608
+    },
+    {
+      "round": 3,
+      "flavor": "yolo26",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 5.08948
+    },
+    {
+      "round": 3,
+      "flavor": "yolov10",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 5.27588
+    },
+    {
+      "round": 3,
+      "flavor": "yolov7",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 37.4002
+    },
+    {
+      "round": 3,
+      "flavor": "yolo26",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 26.9774
+    },
+    {
+      "round": 3,
+      "flavor": "yolov10",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 29.5284
+    },
+    {
+      "round": 4,
+      "flavor": "yolov7",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 8.1189
+    },
+    {
+      "round": 4,
+      "flavor": "yolov10",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 5.26587
+    },
+    {
+      "round": 4,
+      "flavor": "yolo26",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 5.1041
+    },
+    {
+      "round": 4,
+      "flavor": "yolov7",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 37.4208
+    },
+    {
+      "round": 4,
+      "flavor": "yolov10",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 29.6586
+    },
+    {
+      "round": 4,
+      "flavor": "yolo26",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 26.8663
+    },
+    {
+      "round": 5,
+      "flavor": "yolov10",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 5.2688
+    },
+    {
+      "round": 5,
+      "flavor": "yolov7",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 8.11169
+    },
+    {
+      "round": 5,
+      "flavor": "yolo26",
+      "batch": 1,
+      "gpu_median_ms_per_batch": 5.10193
+    },
+    {
+      "round": 5,
+      "flavor": "yolov10",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 29.7163
+    },
+    {
+      "round": 5,
+      "flavor": "yolov7",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 37.4052
+    },
+    {
+      "round": 5,
+      "flavor": "yolo26",
+      "batch": 8,
+      "gpu_median_ms_per_batch": 26.9165
+    }
+  ],
+  "summary": [
+    {
+      "flavor": "yolo26",
+      "batch": 1,
+      "median_ms_per_batch": 5.09445
+    },
+    {
+      "flavor": "yolo26",
+      "batch": 8,
+      "median_ms_per_batch": 26.9092
+    },
+    {
+      "flavor": "yolov10",
+      "batch": 1,
+      "median_ms_per_batch": 5.26929
+    },
+    {
+      "flavor": "yolov10",
+      "batch": 8,
+      "median_ms_per_batch": 29.6586
+    },
+    {
+      "flavor": "yolov7",
+      "batch": 1,
+      "median_ms_per_batch": 8.1189
+    },
+    {
+      "flavor": "yolov7",
+      "batch": 8,
+      "median_ms_per_batch": 37.4208
+    }
+  ]
+}

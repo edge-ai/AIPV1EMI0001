@@ -163,7 +163,7 @@
     "sourceFolder": "src",
     "deployedVersion": "7.5.0",
     "showMsgUib": true,
-    "title": "YOLOv7 Object Counts",
+    "title": "Object Counts",
     "descr": "Live object, ROI and line-crossing counts for AIPV1EMI0001.",
     "editurl": "",
     "x": 350,

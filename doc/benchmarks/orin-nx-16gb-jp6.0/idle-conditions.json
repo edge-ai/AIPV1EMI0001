@@ -1,0 +1,523 @@
+{
+  "started_utc": "2026-11-18T05:45:48.643242+00:00",
+  "power_mode": "MAXN (queried on host before the run)",
+  "gpu_min_frequency_mhz": 306.0,
+  "gpu_max_frequency_mhz": 918.0,
+  "clocks_changed": false,
+  "engines_rebuilt": true,
+  "accuracy_rerun": false,
+  "baseline_interval_seconds": 1,
+  "before_each_flavor": {
+    "yolo26": [
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.718
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.656
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.531
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.593
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.531
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.593
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.906
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.937
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 53.0
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.843
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.687
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.718
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.656
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.625
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.843
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.531
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.906
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 53.093
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 53.062
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 52.906
+      }
+    ],
+    "yolov10": [
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 60.937
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 60.937
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 61.156
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 61.031
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 60.906
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 60.593
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 60.531
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 60.312
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 60.343
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 60.25
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 60.156
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 59.875
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 59.75
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 59.812
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 59.687
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 59.843
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 60.031
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 59.968
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 59.812
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 59.843
+      }
+    ],
+    "yolov7": [
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 63.718
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 63.656
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 63.781
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 63.687
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 63.593
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 63.468
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 63.406
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 63.281
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 63.0
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 62.968
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 62.812
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 62.906
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 62.812
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 63.0
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 63.0
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 62.968
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 62.968
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 62.906
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 62.937
+      },
+      {
+        "gpu_load_percent": 0.0,
+        "gpu_frequency_mhz": 306.0,
+        "gpu_temperature_c": 62.718
+      }
+    ]
+  },
+  "before_crosscheck": [
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.843
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.437
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.406
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.218
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.125
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.843
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.75
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.843
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.843
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.0
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.906
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.656
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.5
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.343
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.343
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.25
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.187
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.531
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.5
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 66.156
+    }
+  ],
+  "after_all_measurements": [
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 68.687
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 68.625
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 68.156
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 68.156
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.937
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.718
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.625
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.781
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.75
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.812
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.812
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.562
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.375
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.281
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.25
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.218
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.062
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.5
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.468
+    },
+    {
+      "gpu_load_percent": 0.0,
+      "gpu_frequency_mhz": 306.0,
+      "gpu_temperature_c": 67.218
+    }
+  ],
+  "finished_utc": "2026-11-18T07:13:15.017892+00:00"
+}
