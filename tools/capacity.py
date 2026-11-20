@@ -915,6 +915,102 @@ def summarize(records):
     return "\n".join(lines)
 
 
+# ---- Published tables (the comparison notebook quotes these) ----
+
+def describe(profile):
+    """A profile in words, for example 'continuous recording + WebRTC + OSD, 1 Mbps'."""
+    config = parse_profile(profile)
+    outputs = [label for label, on in (("continuous recording", config.recording), ("WebRTC", config.webrtc),
+                                       ("HLS", config.hls), ("event recording", config.eventrec)) if on]
+    text = " + ".join(outputs) or "no output"
+    if config.osd:
+        text += " + OSD"
+    if config.bitrate != DEFAULT_BITRATE:
+        text += f", {config.bitrate // 1_000_000} Mbps"
+    if config.tiler != DEFAULT_TILER:
+        text += f", {config.tiler[0]}x{config.tiler[1]} mosaic"
+    return text
+
+
+def capitalized(text):
+    return text[:1].upper() + text[1:]
+
+
+def valid_trials(records):
+    """Searched and fixed-count trials without setup, API or cleanup errors, by (camera set, model, profile)."""
+    grouped = {}
+    for record in records:
+        if record["kind"] not in ("trial", "fixed"):
+            continue
+        trial = record["trial"] if record["kind"] == "fixed" else record
+        try:
+            require_valid_trial(trial)
+        except CapacityError:
+            continue
+        key = (record.get("camera_tag", "unknown"), record["model"], record["profile"])
+        grouped.setdefault(key, []).append(trial)
+    return grouped
+
+
+def camera_table(records, models=MODELS, columns=None):
+    """Supported camera count per model and (camera set, profile), as in the capacity report's answer."""
+    columns = columns or [("720p", "base"), *(("720p", profile) for profile in CAPACITY_PROFILES), ("1080p", "base")]
+    grouped = valid_trials(records)
+    lines = ["| Model | " + " | ".join(f"{camera_tag}, {describe(profile)}" for camera_tag, profile in columns) + " |",
+             "|---|" + "---:|" * len(columns)]
+    contested_any = False
+    for model in models:
+        cells = []
+        for column in columns:
+            trials = grouped.get((column[0], model, column[1]), [])
+            found = supported_capacity(trials)
+            if found is None:
+                cells.append("-" if not trials else f"<{min(trial['n'] for trial in trials)}")
+                continue
+            count, bounded, contested = found
+            contested_any |= contested
+            cells.append(f"{'' if bounded else '≥'}{count}{'†' if contested else ''}")
+        lines.append(f"| {MODEL_NAMES[model]} | " + " | ".join(cells) + " |")
+    if contested_any:
+        lines += ["", "† A higher count passed in one trial and failed in another; the table keeps the lower count."]
+    return "\n".join(lines)
+
+
+def headroom_table(records, models=MODELS, camera_tag="720p", profiles=None):
+    """Slowest-camera FPS of every trial at the first failing count, with and without outputs."""
+    profiles = profiles or ("base", *CAPACITY_PROFILES)
+    grouped = valid_trials(records)
+    lines = ["| Model | Cameras | " + " | ".join(capitalized(describe(profile)) for profile in profiles) + " |",
+             "|---|---:|" + "---|" * len(profiles)]
+    for model in models:
+        evidence = [grouped.get((camera_tag, model, profile), []) for profile in profiles]
+        found = [supported_capacity(trials) for trials in evidence]
+        if None in found:
+            raise CapacityError(f"{model}: no supported count for every profile")
+        failing = {count + 1 for count, _, _ in found}
+        if len(failing) != 1:
+            raise CapacityError(f"{model}: the profiles fail at different counts {sorted(failing)}")
+        n = failing.pop()
+        cells = [", ".join(f"{trial['min_fps']:.2f}" + (" (passed)" if trial["pass"] else "")
+                           for trial in trials if trial["n"] == n) or "-" for trials in evidence]
+        lines.append(f"| {MODEL_NAMES[model]} | {n} | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def screening_table(records, stage="screening"):
+    """One row per fixed-count screening run: which outputs, the slowest camera and the GPU load."""
+    runs = [record for record in records if record["kind"] == "fixed" and record.get("stage") == stage]
+    lines = ["| Model | Cameras | Outputs | Slowest camera FPS | Mean GPU busy |", "|---|---:|---|---:|---:|"]
+    for record in runs:
+        trial = record["trial"]
+        require_valid_trial(trial)
+        gpu = (worst_attempt(trial).get("tegrastats") or {}).get("gpu_percent", {}).get("mean")
+        lines.append(f"| {MODEL_NAMES[record['model']]} | {trial['n']} | {capitalized(describe(record['profile']))} | "
+                     f"{trial['min_fps']:.2f}{'' if trial['pass'] else ' (failed)'} | "
+                     f"{'n/a' if gpu is None else f'{gpu:.1f}%'} |")
+    return "\n".join(lines)
+
+
 # ---- The plan ----
 
 def full_factorial():

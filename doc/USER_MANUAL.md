@@ -28,9 +28,34 @@ To build from source instead, follow the build notebook of the model you want, f
 
 ## Configuration
 
-No `options.json` — the detector runs with the defaults baked into
-`configs/config_infer_primary_detector_<flavor>.txt` (confidence threshold 0.35, NMS IoU 0.65)
-and `configs/config_tracker_NvDCF_perf.yml` (NvDCF tracker parameters).
+### Where model settings live
+
+The GitHub v7.0.0 archive contains **one AIP with YOLO26n**. To use another
+detector, follow its build notebook instead. All three builds use the same AIP
+ID: installing another flavor is a replacement, not a side-by-side
+installation. There is no `options.json` or runtime model selector.
+
+| What you want to change | Where to change it |
+|---|---|
+| One detector's engine or inference settings | Edit [`flavors/<id>/`](../flavors/): `flavor.json` describes the model and engine; the `.txt` and `config.pbtxt` files configure DeepStream and Triton. |
+| Tracking or counting for every detector | Edit the shared [`configs/config_tracker_NvDCF_perf.yml`](../configs/config_tracker_NvDCF_perf.yml) or [`callback.py`](../callback.py). The shared class list lives in [`labels-rev3.txt`](../models/AIPV1EMI0001_Yolo_Detector/labels-rev3.txt). |
+
+For example, in a **development checkout**, `python3 tools/flavors.py use yolov10` copies the YOLOv10n
+inference settings into the top-level `configs/` and `models/` folders and
+updates the manifest, store metadata and weights license. Don't edit those
+copied settings by hand: the next selection overwrites them. By default the
+DeepStream configs set a confidence threshold of 0.35 and NMS IoU of 0.65.
+`python3 tools/flavors.py list` shows the selection (`*`), and
+`python3 tools/flavors.py check` checks that the files match the recipe.
+Selection alone does not build an engine or install a package. The
+[YOLOv10n notebook](../notebooks/02-build-yolov10.ipynb) builds the engine,
+exports the package and shows how to verify the registered detector.
+
+The [camera benchmarks](benchmarks/orin-nx-16gb-jp6.0/capacity.md#test-conditions)
+used separate **test IDs** so the three builds could stay installed without
+replacing the existing AIP. Each trial ran just one detector. In that report a
+*profile* describes pipeline settings such as recording, OSD and streaming,
+not another AIP to install.
 
 ## Node-RED dashboard
 

@@ -6,19 +6,23 @@ This repository is a working **AI Processor (AIP)** for the [EdgeAI Station](htt
 
 ## How it works
 
-Each package runs **one detector**. NVIDIA DeepStream decodes the video, runs the TensorRT engine through Triton, and tracks detections across frames. The [callback](callback.py) turns those detections into counts for the dashboard or your own application. Switching [model flavors](flavors/) changes the detector, not the counting logic. All three use official pretrained weights; no training dataset is needed to build the AIP.
+**One AI Processor, one detector per build.** The three folders under [`flavors/`](flavors/) are recipes, not separate AIPs. The v7.0.0 release uses YOLO26n; building another flavor changes the detector, not the `AIPV1EMI0001` ID. The top-level `configs/` and `models/` are the [layout the station reads](doc/USER_MANUAL.md#where-model-settings-live), not a legacy detector.
+
+NVIDIA DeepStream decodes the video, runs the selected TensorRT engine through Triton, and tracks detections across frames. The same [callback](callback.py) turns those detections into counts for the dashboard. All three models use official pretrained weights; no training dataset is needed.
 
 ## Choose a model
 
 YOLO26n is the default and a good first build. YOLOv10n scored almost identically on the three application classes; the compact anchor-based model is the original flavor. Each model has its own build notebook.
 
-| Model and build notebook | Detection accuracy (3-class mAP 50:95) | 720p30 RTSP cameras, no video output |
-|---|---:|---:|
-| [YOLO26n](notebooks/03-build-yolo26.ipynb) | 40.67 | 7 |
-| [YOLOv10n](notebooks/02-build-yolov10.ipynb) | 40.54 | 6 |
-| [Tiny anchor-based model](notebooks/01-build-yolov7.ipynb) | 39.41 | 4 |
+| Model and build notebook | mAP 50:95, 80 COCO classes (published) | mAP 50:95, car / person / truck | FP16 ms per image | 720p30 cameras, no output | 720p30 cameras, all outputs |
+|---|---:|---:|---:|---:|---:|
+| [YOLO26n](notebooks/03-build-yolo26.ipynb) | 39.92 (40.1) | 40.67 | 5.3 | 7 | 7 |
+| [YOLOv10n](notebooks/02-build-yolov10.ipynb) | 38.34 (38.5) | 40.54 | 5.5 | 6 | 6 |
+| [Tiny anchor-based model](notebooks/01-build-yolov7.ipynb) | 37.13 (n/a) | 39.41 | 8.4 | 4 | 4 |
 
-These are separate FP16 tests on a **Jetson Orin NX 16 GB**. Accuracy scores cover only car, person and truck on 5,000 COCO validation images. The [comparison notebook](notebooks/04-compare-models.ipynb) gives standard 80-class scores and inference times. Camera counts come from a live pipeline: every camera averaged at least **29 processed FPS**. See the [capacity report](doc/benchmarks/orin-nx-16gb-jp6.0/capacity.md) for recording, overlays, WebRTC, HLS and known limitations.
+Measured on one **Jetson Orin NX 16 GB** (JetPack 6.0, TensorRT 8.6, FP16 engines) from 17 to 19 November 2026. Accuracy uses all 5,000 COCO val2017 images; the authors' published score is in brackets. Inference time is for one image on an idle GPU, without decoding or tracking. A camera count passed when every 30 FPS H.264 camera averaged at least **29 processed FPS**. *All outputs* means continuous recording, WebRTC, HLS and event recording with on-screen boxes; they used part of the margin but didn't lower the counts. 1080p cameras without output gave the same counts.
+
+The [comparison notebook](notebooks/04-compare-models.ipynb) shows every table, the chart and the test dates without running code. The [capacity report](doc/benchmarks/orin-nx-16gb-jp6.0/capacity.md) has the raw trials and known limitations, including one-camera WebRTC and recording failures on the test build.
 
 ## Get started
 

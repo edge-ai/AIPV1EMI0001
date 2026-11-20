@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1104 160" width="1104" height="160" role="img" aria-labelledby="title desc">
+  <title id="title">Follow one frame through the AI Processor</title>
+  <desc id="desc">Five stages from left to right: camera or file, decode and batch frames with DeepStream, detect objects with nvinferserver and the parser, track objects with nvtracker NvDCF, count and publish with callback.py.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#1d4ed8"/>
+    </marker>
+  </defs>
+  <rect width="1104" height="160" rx="12" fill="#ffffff"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">
+    <g fill="#eff6ff" stroke="#3b82f6" stroke-width="2">
+      <rect x="24" y="36" width="176" height="64" rx="10"/>
+      <rect x="244" y="36" width="176" height="64" rx="10"/>
+      <rect x="464" y="36" width="176" height="64" rx="10"/>
+      <rect x="684" y="36" width="176" height="64" rx="10"/>
+      <rect x="904" y="36" width="176" height="64" rx="10"/>
+    </g>
+    <g stroke="#1d4ed8" stroke-width="2.5" marker-end="url(#arrow)">
+      <line x1="202" y1="68" x2="240" y2="68"/>
+      <line x1="422" y1="68" x2="460" y2="68"/>
+      <line x1="642" y1="68" x2="680" y2="68"/>
+      <line x1="862" y1="68" x2="900" y2="68"/>
+    </g>
+    <g font-size="16" font-weight="600" fill="#0f172a">
+      <text x="112" y="74">Camera or file</text>
+      <text x="332" y="62">Decode and</text>
+      <text x="332" y="84">batch frames</text>
+      <text x="552" y="74">Detect objects</text>
+      <text x="772" y="74">Track objects</text>
+      <text x="992" y="74">Count and publish</text>
+    </g>
+    <g font-size="14" fill="#475569">
+      <text x="112" y="128">RTSP stream or video</text>
+      <text x="332" y="128">DeepStream</text>
+      <text x="552" y="128">nvinferserver + parser</text>
+      <text x="772" y="128">nvtracker (NvDCF)</text>
+      <text x="992" y="128">callback.py</text>
+    </g>
+  </g>
+</svg>

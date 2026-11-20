@@ -598,6 +598,26 @@ class CapacityPlanTests(unittest.TestCase):
         self.assertIn("| 6 | 29.10 | invalid |", text)
         self.assertIn("Excluded 1 invalid trial", text)
 
+    def test_published_tables_describe_profiles_and_flag_contested_counts(self):
+        def run(profile, outcomes):
+            return [{"kind": "trial", "model": "yolo26", "profile": profile, "camera_tag": "720p",
+                     "n": n, "pass": passed, "min_fps": fps} for n, passed, fps in outcomes]
+
+        records = [*run("base", ((6, True, 30.1), (7, True, 29.2), (7, False, 28.8))),
+                   *run("rec+webrtc-osd", ((6, True, 30.0), (7, False, 27.5)))]
+        self.assertEqual(capacity.describe("webrtc-osd-1M"), "WebRTC + OSD, 1 Mbps")
+        table = capacity.camera_table(records, ("yolo26",),
+                                      [("720p", "base"), ("720p", "rec+webrtc-osd"), ("1080p", "base")])
+        self.assertIn("| Model | 720p, no output | 720p, continuous recording + WebRTC + OSD | 1080p, no output |",
+                      table)
+        self.assertIn("| YOLO26n | 6† | 6 | - |", table)
+        self.assertIn("† A higher count passed in one trial and failed in another", table)
+        headroom = capacity.headroom_table(records, ("yolo26",), profiles=("base", "rec+webrtc-osd"))
+        self.assertIn("| YOLO26n | 7 | 29.20 (passed), 28.80 | 27.50 |", headroom)
+        with self.assertRaises(capacity.CapacityError):
+            capacity.headroom_table([*records, *run("rec+webrtc+hls+evt-osd", ((5, True, 30.0), (6, False, 28.0)))],
+                                    ("yolo26",))
+
     def test_plan_covers_every_packaged_flavor_and_prunes_factorial(self):
         self.assertEqual(set(capacity.MODELS), set(flavors.flavor_ids(ROOT)))
         factorial = capacity.full_factorial()
