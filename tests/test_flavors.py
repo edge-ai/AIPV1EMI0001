@@ -2,6 +2,7 @@ import importlib.util
 import json
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,6 +24,7 @@ def copy_repository(destination):
         shutil.copytree(ROOT / name, destination / name)
     for name in COPIED:
         shutil.copy2(ROOT / name, destination / name)
+    flavors.use(destination, flavors.active_id(destination))
     return destination
 
 
@@ -80,8 +82,32 @@ class FlavorDefinitionTests(unittest.TestCase):
             flavor = flavors.load(ROOT, flavor_id)
             self.assertIn(flavor["family"], flavors.RAW_OUTPUTS)
 
-    def test_the_repository_matches_its_active_flavor(self):
-        self.assertIn(flavors.check(ROOT), flavors.flavor_ids(ROOT))
+    def test_the_committed_files_match_the_active_flavor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("flavors", "licenses"):
+                shutil.copytree(ROOT / name, root / name)
+            (root / "configs").mkdir()
+            for name in COPIED:
+                shutil.copy2(ROOT / name, root / name)
+            flavor_id = flavors.active_id(root)
+            self.assertIn(flavor_id, flavors.flavor_ids(ROOT))
+            flavors.use(root, flavor_id)
+            self.assertEqual(flavors.check(root), flavor_id)
+            for name in COPIED:
+                self.assertEqual((root / name).read_bytes(), (ROOT / name).read_bytes(), name)
+
+    def test_the_selected_copies_are_not_tracked(self):
+        if shutil.which("git") is None or not (ROOT / ".git").exists():
+            self.skipTest("not a git checkout")
+        flavor = flavors.load(ROOT, flavors.active_id(ROOT))
+        copies = [f"configs/{flavor['infer_config']}", f"{flavors.MODEL_DIR}/config.pbtxt"]
+        ignored = subprocess.run(["git", "check-ignore", "--no-index", *copies], cwd=ROOT,
+                                 capture_output=True, text=True, check=True).stdout.split()
+        self.assertEqual(ignored, copies)
+        tracked = subprocess.run(["git", "ls-files", "--", *copies], cwd=ROOT,
+                                 capture_output=True, text=True, check=True).stdout.split()
+        self.assertEqual(tracked, [])
 
 
 class FlavorSwitchTests(unittest.TestCase):

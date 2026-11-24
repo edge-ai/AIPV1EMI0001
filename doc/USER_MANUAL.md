@@ -41,9 +41,13 @@ installation. There is no `options.json` or runtime model selector.
 | Tracking or counting for every detector | Edit the shared [`configs/config_tracker_NvDCF_perf.yml`](../configs/config_tracker_NvDCF_perf.yml) or [`callback.py`](../callback.py). The shared class list lives in [`labels-rev3.txt`](../models/AIPV1EMI0001_Yolo_Detector/labels-rev3.txt). |
 
 For example, in a **development checkout**, `python3 tools/flavors.py use yolov10` copies the YOLOv10n
-inference settings into the top-level `configs/` and `models/` folders and
-updates the manifest, store metadata and weights license. Don't edit those
-copied settings by hand: the next selection overwrites them. By default the
+inference settings into the top-level `configs/` and `models/` folders, where the
+station expects them, and updates the manifest, store metadata and weights
+license. [`bin/build.sh`](../bin/build.sh) does this before every build. The
+copied `config_infer_primary_detector_<id>.txt` and `config.pbtxt` are
+git-ignored, so a fresh clone has only the shared tracker config and class list
+there until you select or build a model. Don't edit the copies by hand: the next
+selection overwrites them. By default the
 DeepStream configs set a confidence threshold of 0.35 and NMS IoU of 0.65.
 `python3 tools/flavors.py list` shows the selection (`*`), and
 `python3 tools/flavors.py check` checks that the files match the recipe.

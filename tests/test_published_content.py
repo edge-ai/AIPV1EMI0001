@@ -22,8 +22,11 @@ import flavors  # noqa: E402
 from public_reference import assert_no_private_references  # noqa: E402
 
 RESULTS = ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0"
+EX3_RESULTS = ROOT / "doc/benchmarks/orin-nano-8gb-jp6.0"
 NOTEBOOKS = ROOT / "notebooks"
 BUILD = {"yolov7": "01-build-yolov7.ipynb", "yolov10": "02-build-yolov10.ipynb", "yolo26": "03-build-yolo26.ipynb"}
+BASELINE_COLUMNS = [("720p", "base"), ("1080p", "base")]
+WEBRTC_SCREENING = [name for name in capacity.SCREENING if not capacity.parse_profile(name).eventrec]
 
 
 def notebook(name):
@@ -79,20 +82,68 @@ class PublishedContentTests(unittest.TestCase):
         records = capacity.load(RESULTS / "capacity.jsonl")
         models = [entry["flavor"]["id"] for entry in self.entries]
         summary = table_rows(compare_models.summary_table(self.entries))
-        cameras = table_rows(capacity.camera_table(records, models))
+        cameras = table_rows(capacity.camera_table(records, models, BASELINE_COLUMNS))
         for model, accuracy, counts in zip(models, summary, cameras):
             with self.subTest(model=model):
                 row = next(line for line in readme.splitlines()
                            if line.startswith("| [") and f"(notebooks/{BUILD[model]})" in line)
                 counts = [count.rstrip("†") for count in counts[1:]]
-                # The caption says outputs and 1080p cameras gave the same counts.
+                # The caption compares input resolutions, not unsupported output combinations.
                 self.assertEqual(len(set(counts)), 1, counts)
-                self.assertEqual(table_rows(f"|\n|\n{row}")[0][1:], [*accuracy[1:4], counts[0], counts[2]])
+                self.assertEqual(table_rows(f"|\n|\n{row}")[0][1:], [*accuracy[1:4], counts[0]])
         self.assertNotIn("yolov7", re.sub(r"\]\([^)]*\)", "]", readme).lower())
 
     def test_the_presentation_is_read_only(self):
         presentation = notebook("00-presentation.ipynb")
         self.assertFalse([cell for cell in presentation["cells"] if cell["cell_type"] == "code"])
+
+    def test_supported_matrix_does_not_relabel_historical_output_results(self):
+        readme = (ROOT / "README.md").read_text()
+        plan = (ROOT / "doc/benchmarks/capacity/README.md").read_text()
+        comparison = markdown("04-compare-models.ipynb")
+        table = plan.split("| Device |", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("| Device |" + table, comparison)
+        baseline = table_rows(capacity.camera_table(capacity.load(RESULTS / "capacity.jsonl"),
+                                                    columns=[("720p", "base")]))
+        counts = {row[0]: row[1].rstrip("†") for row in baseline}
+        ex3_counts = {
+            "YOLO26n": ["5", "Fails at 1", "3†", "Unstable"],
+            "YOLOv10n": ["5", "Fails at 1", "4†", "Unstable"],
+            "YOLOv7-tiny": ["3", "Fails at 1", "3", "1†"],
+        }
+        for line in table_rows("| Device |" + table):
+            device, model, *cells = line
+            expected = ([f"{counts[model]} (historical)", "-", "-", "-"] if device.startswith("EX5")
+                        else ex3_counts[model])
+            self.assertEqual(cells, expected)
+        for text in (readme, comparison):
+            headers = [line.lower() for line in text.splitlines() if line.startswith("|")]
+            self.assertFalse(any("continuous recording" in line or "hls" in line or "all outputs" in line
+                                 for line in headers))
+        self.assertIn("pre/post", comparison)
+        self.assertIn("EX5 output profiles remain unmeasured", comparison)
+        self.assertTrue((RESULTS / "capacity-historical.md").is_file())
+
+    def test_ex3_results_and_evidence_are_published_consistently(self):
+        report = (EX3_RESULTS / "capacity.md").read_text()
+        matrix = (ROOT / "doc/benchmarks/capacity/README.md").read_text()
+        comparison = markdown("04-compare-models.ipynb")
+        evidence = (EX3_RESULTS / "capacity.jsonl").read_text()
+        assert_no_private_references(self, evidence, "EX3 capacity evidence")
+        records = capacity.load(EX3_RESULTS / "capacity.jsonl")
+        table = capacity.camera_table(
+            records, self.by_id.keys(),
+            [("720p", profile) for profile in ("base", "webrtc-osd", "evt-osd", "webrtc+evt-osd")])
+        self.assertIn("contains 81 pilot, search,", report)
+        self.assertIn("capacity.jsonl", report)
+        self.assertIn("| YOLO26n | 5 | <1 | 3† | <1 |", table)
+        self.assertIn("WEBRTC + SMART VIDEO", report.upper())
+        self.assertIn("| EX3, Orin Nano 8 GB | YOLO26n | 5 | Fails at 1 | 3† | Unstable |", matrix)
+        self.assertIn("| EX3, Orin Nano 8 GB | YOLO26n | 5 | Fails at 1 | 3† | Unstable |", comparison)
+        self.assertEqual({(row["device"], row["protocol"]) for row in records},
+                         {("ex3-orin-nano-8gb-15w", "webrtc-smart-video-v1")})
+        self.assertEqual({row["model"] for row in records if row["kind"] in {"trial", "fixed"}},
+                         set(self.by_id))
 
     def test_the_recorded_summary_is_visible_without_running_the_comparison(self):
         self.assertIn(compare_models.summary_table(self.entries), markdown("04-compare-models.ipynb"))
@@ -134,8 +185,8 @@ class PublishedContentTests(unittest.TestCase):
         self.assertEqual(min(latency, key=latency.get), default)
 
     def test_recorded_files_are_public_material(self):
-        for path in sorted(RESULTS.rglob("*")):
-            if path.suffix in {".json", ".md"}:
+        for path in sorted((*RESULTS.rglob("*"), *EX3_RESULTS.rglob("*"))):
+            if path.suffix in {".json", ".jsonl", ".md"}:
                 text = path.read_text()
                 assert_no_private_references(self, text, path.name)
                 self.assertNotIn("/tmp/", text, path.name)
@@ -185,9 +236,9 @@ class ComparisonNotebookTests(unittest.TestCase):
                     "latency": compare_models.latency_table(self.entries),
                     "precision": compare_models.precision_table(self.entries),
                     "parity": compare_models.parity_table(self.entries),
-                    "cameras": capacity.camera_table(self.records, self.models),
-                    "headroom": capacity.headroom_table(self.records, self.models),
-                    "screening": capacity.screening_table(self.records)}
+                    "cameras": capacity.camera_table(self.records, self.models, BASELINE_COLUMNS),
+                    "headroom": capacity.headroom_table(self.records, self.models, profiles=("base",)),
+                    "screening": capacity.screening_table(self.records, profiles=WEBRTC_SCREENING)}
         for name, table in expected.items():
             with self.subTest(table=name):
                 self.assertIn(table, self.text)
@@ -199,12 +250,18 @@ class ComparisonNotebookTests(unittest.TestCase):
         trials = [row["trial"] if row["kind"] == "fixed" else row for row in self.records
                   if row["kind"] in ("trial", "fixed")]
         cameras = {day(attempt["started"]) for trial in trials for attempt in (trial.get("attempts") or [trial])}
+        ex3_records = capacity.load(EX3_RESULTS / "capacity.jsonl")
+        ex3_trials = [row["trial"] if row["kind"] == "fixed" else row for row in ex3_records
+                      if row["kind"] in ("trial", "fixed")]
+        ex3_cameras = {day(attempt["started"]) for trial in ex3_trials
+                       for attempt in (trial.get("attempts") or [trial]) if attempt.get("started")}
         checks = json.loads((RESULTS / "capacity-outputs.json").read_text())["checks"]
         outputs = {day(check["probe"]["t"]) for check in checks}
         for text in (f"| Accuracy | {span(accuracy)} |", f"| Inference time | {span(latency)} |",
-                     f"| Camera capacity | {span(cameras)} | {len(trials)} live RTSP trials",
+                     f"| Camera capacity (EX5) | {span(cameras)} | {len(trials)} live RTSP trials",
+                     f"| Camera capacity (EX3) | {span(ex3_cameras)} | 720p, WebRTC and Smart Video tests",
                      f"| Output checks | {span(outputs)} | {len(checks)} YOLO26n output diagnostics |",
-                     f"measured from {span(accuracy | latency | cameras | outputs)}"):
+                     "EX3 capacity was measured 24 November 2026 under the revised protocol"):
             with self.subTest(text=text):
                 self.assertIn(text, self.text)
 

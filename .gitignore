@@ -9,3 +9,6 @@ src/nvdsinfer_customparser/libnvds_infercustomparser.so
 *.engine
 *.cache
 models/*/libnvds_infercustomparser.so
+# Copies of the selected flavor, written by tools/flavors.py use (edit flavors/<id>/ instead)
+configs/config_infer_primary_detector_*.txt
+models/*/config.pbtxt

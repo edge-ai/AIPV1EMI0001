@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- benchmark: Restrict new output trials to WebRTC and triggered Smart Video recording with explicit pre/post times and clip checks; retain the old EX5 evidence as historical, remove unsupported output capacity claims, and document EX3/EX5 live-test prerequisites
+- chore: Stop tracking the selected flavor's inference config and `config.pbtxt` copies; `tools/flavors.py use` and `bin/build.sh` generate them from `flavors/<id>/`, and the release workflow regenerates them and checks that the committed manifest, store metadata and weights license match
 - docs: Show every recorded result in the comparison notebook as text, so GitHub displays it without running code: accuracy, inference time, live camera counts with and without video outputs, output settings, what was not tested, and when each test ran
 - docs: Add 80-class mAP, inference time and camera counts with all video outputs to the README results table, with the test dates
 - docs: Explain that the three flavors are build recipes for one AI Processor and that the top-level `configs/` and `models/` hold the selected flavor

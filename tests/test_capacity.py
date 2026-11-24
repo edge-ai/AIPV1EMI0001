@@ -37,22 +37,32 @@ class CapacityProfileTests(unittest.TestCase):
             capacity.parse_profile("rec-osd")
 
     def test_pipeline_setup_enables_only_requested_output_branches(self):
-        config = capacity.parse_profile("rec+webrtc+hls+evt-osd")
+        config = capacity.parse_profile("webrtc+evt-osd")
         body = capacity.pipeline_setup("test", config, {"pk": "aip-pk"}, ["m1", "m2", "m3"])
         pipeline = body["pipeline"]
         self.assertEqual(pipeline["ai_processor_setup"]["uuid"], "aip-pk")
         self.assertEqual(pipeline["ai_processor_setup"]["batch_size"], 3)
-        self.assertTrue(pipeline["hls_output_sink_setup"]["active"])
-        self.assertTrue(pipeline["mtx_output_sink_setup"]["recording_enabled"])
+        self.assertFalse(pipeline["hls_output_sink_setup"]["active"])
+        self.assertFalse(pipeline["mtx_output_sink_setup"]["recording_enabled"])
         self.assertTrue(pipeline["mtx_output_sink_setup"]["webrtc_enabled"])
         self.assertEqual(pipeline["mtx_output_sink_setup"]["num_slots"], 2)
         self.assertEqual(pipeline["eventrec_sink_setup"], {
             "active": True, "osd": True, "bitrate": capacity.EVENTREC_BITRATE,
+            "pre_duration": 3000, "post_duration": 6000, "max_duration": 10000,
         })
+        self.assertFalse(pipeline["auto_reload"])
 
         base = capacity.pipeline_setup("test", capacity.Config(), {"pk": "aip-pk"}, ["m1"])
         self.assertFalse(base["pipeline"]["hls_output_sink_setup"]["active"])
         self.assertFalse(base["pipeline"]["mtx_output_sink_setup"]["active"])
+
+    def test_historical_profiles_can_be_read_but_not_run(self):
+        for name in ("rec", "hls", "rec+webrtc-osd", "rec+webrtc+hls+evt-osd"):
+            with self.subTest(profile=name):
+                config = capacity.parse_profile(name)
+                self.assertTrue(capacity.describe(name))
+                with self.assertRaisesRegex(capacity.CapacityError, "historical-only"):
+                    capacity.pipeline_setup("test", config, {"pk": "aip"}, ["camera"])
 
     def test_batch_size_caps_at_engine_maximum(self):
         body = capacity.pipeline_setup("test", capacity.Config(), {"pk": "aip-pk"},
@@ -189,6 +199,13 @@ class FakeStation:
         self.sticky = {}
         self.created = 0
         self.perf = 30.0
+        self.records = {}
+        self.paths = {
+            "/pipeline/{uuid}/inputs/fps": {"get": {}}, "/pipeline/{uuid}/status": {"get": {}},
+            "/metrics": {"get": {}}, "/pipeline/{uuid}/mtx/start": {"post": {}},
+            "/pipeline/{uuid}/eventrec/trigger": {"post": {}}, "/pipeline/records": {"get": {}},
+            "/pipeline/record/{uuid}": {"get": {}}, "/pipeline/records/deletion": {"post": {}},
+        }
 
     def call(self, method, path, body=None, query=None, form=None, ok=(200, 201, 202)):
         self.calls.append((method, path, dict(query or {})))
@@ -206,6 +223,9 @@ class FakeStation:
         return pk
 
     def respond(self, method, path, body, form):
+        query = self.calls[-1][2]
+        if (method, path) == ("GET", "/openapi.json"):
+            return 200, {"paths": self.paths}
         if (method, path) == ("GET", "/aiprocessors"):
             return 200, [self.AIP]
         if (method, path) == ("GET", "/medias"):
@@ -227,7 +247,10 @@ class FakeStation:
             self.pipelines[pk]["inputs"] = len(pipeline["inputs"])
             return 201, {"pk": pk}
         if (method, path) == ("POST", "/pipeline/records/deletion"):
-            return 404, "no records"
+            self.records.pop(query["pipeline_uuid"], None)
+            return 200, {"message": "deletion accepted"}
+        if (method, path) == ("GET", "/pipeline/records"):
+            return 200, {"records": self.records.get(query["pipeline_uuid"], []), "pagination": {"max_page": 1}}
         if path in ("/recordings/start", "/recordings/stop"):
             pipeline = body["pipeline_id"]
             if path.endswith("start"):
@@ -265,7 +288,12 @@ class FakeStation:
                                       "link": {"state": "streaming", "attempt": 0}} for index in range(inputs)}
         if action == "/fps":
             return 200, {"average_10sec": self.perf}
-        if action in ("/start", "/stop", "/mtx/start", "/eventrec/trigger"):
+        if action == "/eventrec/trigger":
+            pk = match.group(1)
+            records = self.records.setdefault(pk, [])
+            records.append({"record_uuid": f"clip-{len(records)}", "record_type": "eventrec", "pipeline_uuid": pk})
+            return 200, {"status": 200}
+        if action in ("/start", "/stop", "/mtx/start"):
             return 200, None
         return 404, f"unexpected {method} {path}"
 
@@ -280,6 +308,10 @@ class CapacitySessionTests(unittest.TestCase):
         settle = mock.patch.object(capacity, "MEDIA_SETTLE_SECONDS", 0)
         settle.start()
         self.addCleanup(settle.stop)
+        probe = mock.patch.object(capacity, "probe_smart_clip", return_value={
+            "duration_seconds": 9, "decoded_frames": 270, "decoded_fps": 30, "fps_pass": True, "codec": "h264"})
+        probe.start()
+        self.addCleanup(probe.stop)
 
     def session(self, **options):
         return capacity.Session(self.station, FakeStation.AIP, "yolo26", self.ledger, signaling=self.station,
@@ -316,22 +348,42 @@ class CapacitySessionTests(unittest.TestCase):
         self.assertEqual(self.station.media, {})
         self.assertFalse(self.ledger.path.exists())
 
-    def test_recording_trial_uses_signaling_keeps_samples_and_deletes_what_it_wrote(self):
+    def test_smart_video_trial_triggers_probes_clips_and_deletes_what_it_wrote(self):
         session = self.session()
         session.create_media("rtsp://VCAM:PORT/cam{index:02d}", 2, "1080p")
-        record = session.trial(2, capacity.parse_profile("rec"))
+        record = session.trial(2, capacity.parse_profile("evt"))
 
         self.assertTrue(record["pass"], record["reasons"])
-        self.assertEqual(record["recording_files"], 1)
+        self.assertEqual(len(record["smart_video"]["clips"]), 1)
+        self.assertEqual(len(record["smart_video"]["triggers"]), 1)
+        self.assertEqual(record["smart_video"]["pre_duration_ms"], 3000)
+        self.assertEqual(record["smart_video"]["post_duration_ms"], 6000)
         self.assertEqual(record["aip"]["unique_id"], "AIPV1EMI9026")
         self.assertTrue(record["model_verified"])
         self.assertTrue(record["samples"] and all("t" in sample for sample in record["samples"]))
         self.assertFalse(any(path.endswith("/mtx/start") for _, path, _ in self.station.calls))
-        self.assertIn("/recordings/start", [path for _, path, _ in self.station.calls])
+        self.assertTrue(any(path.endswith("/eventrec/trigger") for _, path, _ in self.station.calls))
+        self.assertNotIn("/recordings/start", [path for _, path, _ in self.station.calls])
         self.assertEqual(self.station.pipelines, {})
         self.assertEqual(self.station.recording, set())
         self.assertFalse(any(self.station.files.values()))
+        self.assertFalse(self.station.records)
         self.assertEqual(self.ledger.read()["pipelines"], {})
+
+    def test_smart_video_low_clip_fps_is_a_measured_failure(self):
+        with mock.patch.object(capacity, "probe_smart_clip", return_value={
+                "duration_seconds": 9, "decoded_frames": 245, "decoded_fps": 27.2,
+                "fps_pass": False, "codec": "h264"}):
+            session = self.session()
+            session.create_media("rtsp://VCAM:PORT/cam{index:02d}", 1, "720p")
+            record = session.trial(1, capacity.parse_profile("evt"))
+
+        self.assertFalse(record["pass"])
+        self.assertNotIn("error", record)
+        self.assertIn("got h264 at 27.2 FPS", record["reasons"][0])
+        self.assertEqual(record["smart_video"]["clips"][0]["decoded_frames"], 245)
+        self.assertEqual(self.station.pipelines, {})
+        self.assertFalse(self.station.records)
 
     def test_fast_camera_arrival_cannot_hide_slow_inference(self):
         self.station.perf = 10.0
@@ -401,10 +453,12 @@ class CapacitySessionTests(unittest.TestCase):
 
     def test_failed_recording_stop_does_not_delete_files_still_being_written(self):
         self.station.broken.add(("POST", "/recordings/stop"))
-        session = self.session()
-        session.create_media("rtsp://VCAM:PORT/{index}", 1, "1080p")
-        record = session.trial(1, capacity.parse_profile("rec"))
-        self.assertTrue(record["cleanup_errors"])
+        pk = self.station.add("pipelines", "cap-old-rec")
+        self.station.pipelines[pk]["inputs"] = 1
+        self.station.recording.add(pk)
+        self.station.files[pk] = {"old.mp4"}
+        self.ledger.add("pipelines", pk, name="cap-old-rec", profile="rec", run="old")
+        self.assertTrue(capacity.cleanup(self.station, self.station, self.ledger, log=self.log.append))
         self.assertTrue(any(self.station.files.values()))
         self.assertFalse(any(method == "DELETE" and path.endswith("/files")
                              for method, path, _ in self.station.calls))
@@ -479,7 +533,8 @@ class CapacitySessionTests(unittest.TestCase):
 
     def test_command_line_checks_the_aip_and_records_provenance(self):
         out = self.ledger.path.parent / "capacity.jsonl"
-        common = ["--ms3", "http://MS3:8000", "--aip", "AIPV1EMI9026", "--rtsp-template", "rtsp://VCAM:PORT/{index}",
+        common = ["--ms3", "http://MS3:8000", "--device", "ex3", "--aip", "AIPV1EMI9026",
+                  "--rtsp-template", "rtsp://VCAM:PORT/{index}",
                   "--warmup", "0", "--window", "0.03", "--interval", "0.01", "--containers", "", "--out", str(out)]
 
         def run(*argv):
@@ -492,7 +547,7 @@ class CapacitySessionTests(unittest.TestCase):
         self.assertIn("not YOLOv7-tiny", output)
         code, output = run("fixed", "--model", "yolo26", "--n", "1", "--profile", "rec", *common)
         self.assertEqual(code, 1)
-        self.assertIn("--signaling", output)
+        self.assertIn("historical-only", output)
         self.assertFalse(out.exists())
 
         code, output = run("fixed", "--model", "yolo26", "--n", "2", *common)
@@ -500,12 +555,14 @@ class CapacitySessionTests(unittest.TestCase):
         record = capacity.load(out)[-1]
         self.assertEqual((record["kind"], record["aip"]["version"], record["model_verified"]), ("fixed", "1.0.0", True))
         self.assertTrue(record["trial"]["pass"] and record["trial"]["samples"])
+        self.assertEqual(record["device"], "ex3")
+        self.assertEqual(record["protocol"], capacity.PROTOCOL)
         self.assertEqual((self.station.media, self.station.pipelines), ({}, {}))
         self.assertFalse(self.ledger.path.exists())
         self.assertIn("AIPs: yolo26 = AIPV1EMI9026 1.0.0", capacity.summarize(capacity.load(out)))
 
     def test_invalid_cli_timings_and_camera_count_fail_before_station_access(self):
-        common = ["fixed", "--model", "yolo26", "--ms3", "http://MS3:8000", "--aip", "AIPV1EMI9026",
+        common = ["fixed", "--model", "yolo26", "--ms3", "http://MS3:8000", "--device", "ex3", "--aip", "AIPV1EMI9026",
                   "--rtsp-template", "rtsp://VCAM:PORT/{index}", "--out", str(self.ledger.path.parent / "out")]
         for options in (["--n", "0"], ["--n", "1", "--window", "0"],
                         ["--n", "1", "--interval", "-1"], ["--n", "1", "--window", "nan"],
@@ -527,7 +584,7 @@ class CapacitySessionTests(unittest.TestCase):
         self.station.respond = failed_start
         with mock.patch.object(capacity, "Api", return_value=self.station), \
                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            code = capacity.main(["search", "--model", "yolo26", "--ms3", "http://MS3:8000",
+            code = capacity.main(["search", "--model", "yolo26", "--ms3", "http://MS3:8000", "--device", "ex3",
                                   "--aip", "AIPV1EMI9026", "--rtsp-template", "rtsp://VCAM:PORT/{index}",
                                   "--max-n", "2", "--containers", "", "--out", str(output)])
         self.assertEqual(code, 1)
@@ -536,6 +593,76 @@ class CapacitySessionTests(unittest.TestCase):
         self.assertEqual(records[0]["kind"], "trial")
         self.assertTrue(records[0]["error"])
         self.assertEqual((self.station.media, self.station.pipelines), ({}, {}))
+
+    def test_preflight_rejects_old_api_and_occupied_station_without_writes(self):
+        del self.station.paths["/pipeline/{uuid}/inputs/fps"]
+        with self.assertRaisesRegex(capacity.CapacityError, "inputs/fps"):
+            capacity.preflight(self.station, capacity.Config())
+        self.station.paths["/pipeline/{uuid}/inputs/fps"] = {"get": {}}
+        pk = self.station.add("pipelines", "existing-demo")
+        self.station.pipelines[pk]["inputs"] = 1
+        with self.assertRaisesRegex(capacity.CapacityError, "exclusive station"):
+            capacity.preflight(self.station, capacity.Config())
+        self.assertTrue(all(method == "GET" for method, _, _ in self.station.calls))
+
+    def test_smart_video_no_clip_is_an_error_not_a_recording_pass(self):
+        with self.assertRaisesRegex(capacity.CapacityError, "produced 0 clips"):
+            capacity.verify_smart_recordings(self.station, "p1", capacity.Config(eventrec=True),
+                                             [{"t": 0}], "ffprobe", deadline=0)
+        with self.assertRaisesRegex(capacity.CapacityError, "never triggered"):
+            capacity.verify_smart_recordings(self.station, "p1", capacity.Config(eventrec=True), [], "ffprobe")
+
+    def test_smart_video_cleanup_waits_for_deletion_and_keeps_failed_cleanup_owned(self):
+        pk = self.station.add("pipelines", "cap-smart")
+        self.station.pipelines[pk]["inputs"] = 1
+        self.station.records[pk] = [{"record_uuid": "clip", "pipeline_uuid": pk, "record_type": "eventrec"}]
+        self.ledger.add("pipelines", pk, name="cap-smart", profile="evt", run="mine")
+        original = self.station.respond
+
+        def asynchronous_delete(method, path, body, form):
+            if (method, path) == ("POST", "/pipeline/records/deletion"):
+                return 200, {"message": "accepted, not completed"}
+            return original(method, path, body, form)
+
+        self.station.respond = asynchronous_delete
+        with self.assertRaisesRegex(capacity.CapacityError, "remain"):
+            capacity.delete_smart_recordings(self.station, pk, deadline=0)
+        self.assertTrue(self.ledger.read()["pipelines"])
+        self.station.respond = original
+        self.assertEqual(capacity.cleanup(self.station, None, self.ledger, log=self.log.append), [])
+        self.assertFalse(self.station.records)
+
+
+class SmartVideoProbeTests(unittest.TestCase):
+    def test_probe_requires_decodable_full_length_video_with_requested_dimensions(self):
+        good = {"streams": [{"codec_type": "video", "width": 1280, "height": 720, "nb_read_frames": "270",
+                             "codec_name": "h264"}], "format": {"duration": "9"}}
+        variants = [(good, "", True), ({**good, "format": {"duration": "2"}}, "", False),
+                    ({**good, "streams": []}, "", False), (good, "corrupt frame", False),
+                    ({**good, "streams": [{**good["streams"][0], "width": 640}]}, "", False)]
+        for data, stderr, valid in variants:
+            with self.subTest(data=data, stderr=stderr), mock.patch.object(capacity.subprocess, "run") as run:
+                run.return_value = mock.Mock(returncode=0, stderr=stderr, stdout=json.dumps(data))
+                if valid:
+                    probe = capacity.probe_smart_clip(capacity.Api("http://MS3:8000"),
+                                                      {"record_uuid": "clip"}, capacity.Config(eventrec=True), "ffprobe")
+                    self.assertEqual(probe["decoded_frames"], 270)
+                    self.assertTrue(probe["fps_pass"])
+                    self.assertIn("-count_frames", run.call_args.args[0])
+                else:
+                    with self.assertRaises(capacity.CapacityError):
+                        capacity.probe_smart_clip(capacity.Api("http://MS3:8000"),
+                                                 {"record_uuid": "clip"}, capacity.Config(eventrec=True), "ffprobe")
+
+    def test_probe_keeps_decodable_low_fps_clip_as_measurement(self):
+        data = {"streams": [{"codec_type": "video", "width": 1280, "height": 720, "nb_read_frames": "245",
+                             "codec_name": "h264"}], "format": {"duration": "9"}}
+        with mock.patch.object(capacity.subprocess, "run") as run:
+            run.return_value = mock.Mock(returncode=0, stderr="", stdout=json.dumps(data))
+            probe = capacity.probe_smart_clip(capacity.Api("http://MS3:8000"),
+                                              {"record_uuid": "clip"}, capacity.Config(eventrec=True), "ffprobe")
+        self.assertFalse(probe["fps_pass"])
+        self.assertAlmostEqual(probe["decoded_fps"], 245 / 9)
 
 
 class CapacityPlanTests(unittest.TestCase):
@@ -624,8 +751,18 @@ class CapacityPlanTests(unittest.TestCase):
         totals = capacity.plan_totals()
         self.assertGreater(factorial["raw"], factorial["distinct"])
         self.assertLess(totals["trials"], factorial["distinct"])
-        self.assertEqual(totals["searches"], 10)
+        self.assertEqual(totals["searches"], 12)
+        for name in (*capacity.SCREENING, *capacity.CAPACITY_PROFILES):
+            capacity.validate_live_profile(capacity.parse_profile(name))
         self.assertIn("0 Pilot", [row[0] for row in capacity.plan()])
+
+    def test_published_tables_cannot_mix_devices_or_historical_protocols(self):
+        trial = {"kind": "trial", "model": "yolo26", "profile": "base", "camera_tag": "720p",
+                 "n": 2, "pass": True, "min_fps": 30.0}
+        for other in ({"device": "ex3"}, {"protocol": capacity.PROTOCOL}):
+            with self.subTest(other=other):
+                with self.assertRaisesRegex(capacity.CapacityError, "one device"):
+                    capacity.camera_table([trial, {**trial, **other}])
 
     def test_published_capacity_results_have_raw_boundary_evidence(self):
         records = capacity.load(ROOT / "doc/benchmarks/orin-nx-16gb-jp6.0/capacity.jsonl")
@@ -698,6 +835,7 @@ class CapacityPlanTests(unittest.TestCase):
 
     def test_capacity_artifacts_contain_no_private_station_references(self):
         for name in ("capacity/README.md", "orin-nx-16gb-jp6.0/capacity.md",
+                     "orin-nx-16gb-jp6.0/capacity-historical.md", "capacity/preflight-2026-11-24.json",
                      "orin-nx-16gb-jp6.0/capacity.jsonl", "orin-nx-16gb-jp6.0/capacity-outputs.json"):
             with self.subTest(file=name):
                 text = (ROOT / "doc/benchmarks" / name).read_text()

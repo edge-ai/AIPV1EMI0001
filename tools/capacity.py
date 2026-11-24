@@ -8,9 +8,9 @@ least 29 FPS and no camera reconnects. `search` finds the largest passing N with
 one N, which is how the cheap one-factor screening runs are done. Plain stdlib, so it runs as it is on the station:
 
     python3 tools/capacity.py plan
-    python3 tools/capacity.py search --ms3 http://MS3:8000 --model yolo26 --aip AIPV1EMI9026 \
+    python3 tools/capacity.py search --ms3 http://MS3:8000 --device ex5 --model yolo26 --aip AIPV1EMI9026 \
         --rtsp-template 'rtsp://VCAM:PORT/cam{index:02d}' --profile base --out capacity.jsonl
-    python3 tools/capacity.py fixed  ... --n 8 --profile rec+webrtc-osd --signaling http://SIGNALING:3001/signaling
+    python3 tools/capacity.py fixed  ... --device ex3 --n 4 --profile webrtc+evt-osd
     python3 tools/capacity.py summarize capacity.jsonl
     python3 tools/capacity.py cleanup --ms3 http://MS3:8000 --ledger capacity.jsonl.owned.json
 
@@ -22,6 +22,7 @@ import argparse
 import json
 import math
 import re
+import shutil
 import statistics
 import subprocess
 import sys
@@ -32,7 +33,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from itertools import product
 from pathlib import Path
 
@@ -47,6 +48,11 @@ DEFAULT_MAX_N = 16
 DEFAULT_BITRATE = 2_000_000
 RECORDING_BITRATE = 3_000_000
 EVENTREC_BITRATE = 4_000_000
+SMART_PRE_MS = 3000
+SMART_POST_MS = 6000
+SMART_MAX_MS = 10000
+SMART_TRIGGER_SECONDS = 30
+PROTOCOL = "webrtc-smart-video-v1"
 DEFAULT_TILER = (1280, 720)
 NAME_PREFIX = "cap-"
 # ms3 MTX_SLOT_ROLES: slot 1 records, slot 2 serves WebRTC, slot 3 is RTMP. The signaling service starts slot 1
@@ -64,9 +70,8 @@ PERF_METRIC = "pipeline_perf_fps_average_10sec"
 FACTORS = {
     "model": MODELS,
     "osd": (False, True),
-    "recording": (False, True),
-    "delivery": ("none", "webrtc", "hls"),
-    "event recording": (False, True),
+    "delivery": ("none", "webrtc"),
+    "Smart Video recording": (False, True),
     "delivery bitrate": (1_000_000, 2_000_000, 4_000_000),
     "output resolution": ((640, 360), (1280, 720), (1920, 1080)),
     "camera resolution": ("720p", "1080p"),
@@ -83,6 +88,7 @@ class CapacityError(Exception):
 class Config:
     """What the pipeline does with the frames besides inference. Camera resolution is a property of the media."""
 
+    # Retained to read historical results and recover old ownership ledgers, never for new trials.
     recording: bool = False
     webrtc: bool = False
     hls: bool = False
@@ -141,14 +147,22 @@ def parse_profile(name):
     return config
 
 
+def validate_live_profile(config):
+    if config.recording or config.hls:
+        raise CapacityError("HLS and continuous recording are historical-only; use base, webrtc, evt "
+                            "(Smart Video recording), or webrtc+evt, optionally with -osd")
+
+
 def pipeline_setup(name, config, aip, media_uuids, *, tiler=None):
     """The request body for POST /pipeline. `aip` is an /aiprocessors record."""
+    validate_live_profile(config)
     count = len(media_uuids)
     width, height = tiler or config.tiler
-    mtx = config.recording or config.webrtc
+    mtx = config.webrtc
     return {"pipeline": {
         "name": name,
         "description": "Capacity test created by tools/capacity.py",
+        "auto_reload": False,
         "inputs": [{"media_uuid": media, "analytic_setup": None,
                     "media_setup": {"latency": 200, "use_tcp_only": True, "loop": False, "framerate_limit": None}}
                    for media in media_uuids],
@@ -160,13 +174,14 @@ def pipeline_setup(name, config, aip, media_uuids, *, tiler=None):
         "nodered_output_data_setup": {"active": True},
         "websocket_output_data_setup": {"active": True},
         "rtsp_output_sink_setup": {"active": False},
-        "hls_output_sink_setup": {"active": config.hls, "bitrate": config.bitrate, "max_files": 12,
-                                  "playlist_len": 6, "target_duration": 1},
-        "mtx_output_sink_setup": ({"active": True, "num_slots": 2 if config.webrtc else 1,
-                                   "recording_enabled": config.recording, "webrtc_enabled": config.webrtc,
-                                   "rtmp_enabled": False, "recording_bitrate": RECORDING_BITRATE,
+        "hls_output_sink_setup": {"active": False},
+        "mtx_output_sink_setup": ({"active": True, "num_slots": 2,
+                                   "recording_enabled": False, "webrtc_enabled": True,
+                                   "rtmp_enabled": False,
                                    "webrtc_bitrate": config.bitrate} if mtx else {"active": False}),
-        "eventrec_sink_setup": {"active": config.eventrec, "osd": config.osd, "bitrate": EVENTREC_BITRATE},
+        "eventrec_sink_setup": {"active": config.eventrec, "osd": config.osd, "bitrate": EVENTREC_BITRATE,
+                               "pre_duration": SMART_PRE_MS, "post_duration": SMART_POST_MS,
+                               "max_duration": SMART_MAX_MS},
         "ntp_mode": "auto",
     }}
 
@@ -465,6 +480,26 @@ def find_aip(api, unique_id):
     raise CapacityError(f"AI processor {unique_id} is not registered on this station")
 
 
+def preflight(api, config):
+    """Fail before registering cameras on an incompatible or occupied station."""
+    paths = api.call("GET", "/openapi.json")["paths"]
+    required = {"/pipeline/{uuid}/inputs/fps": "get", "/pipeline/{uuid}/status": "get", "/metrics": "get"}
+    if config.webrtc:
+        required["/pipeline/{uuid}/mtx/start"] = "post"
+    if config.eventrec:
+        required.update({"/pipeline/{uuid}/eventrec/trigger": "post", "/pipeline/records": "get",
+                         "/pipeline/record/{uuid}": "get", "/pipeline/records/deletion": "post"})
+    missing = [f"{method.upper()} {path}" for path, method in required.items()
+               if method not in paths.get(path, {})]
+    if missing:
+        raise CapacityError("station cannot run this comparison protocol; missing " + ", ".join(missing))
+    for pipeline in api.call("GET", "/pipelines"):
+        state = api.call("GET", f"/pipeline/{pipeline['pk']}/status").get("overall")
+        if state not in ("Stopped", "Failed"):
+            raise CapacityError(f"exclusive station required: pipeline {pipeline['name']!r} is {state!r}; "
+                                "no existing pipeline was stopped")
+
+
 def aip_identity(aip):
     """What a result needs to say which AIP produced it."""
     primary = aip.get("primary_processor") or {}
@@ -542,12 +577,80 @@ def recording_files(signaling, uuid_):
 
 
 def start_outputs(ms3, signaling, uuid_, config):
-    """Start the outputs that stay off until asked: WebRTC, and continuous recording the way the station UI does it."""
+    """Start the WebRTC publisher. Smart Video buffers automatically and is triggered during sampling."""
+    validate_live_profile(config)
     if config.webrtc:
         retrying(lambda: ms3.call("POST", f"/pipeline/{uuid_}/mtx/start", query={"stream_index": WEBRTC_SLOT}))
-    if config.recording:
-        retrying(lambda: signaling.call("POST", "/recordings/start", body={"pipeline_id": uuid_}),
-                 statuses=(409, 500, 502, 503))
+
+
+def smart_records(ms3, uuid_):
+    """Only this pipeline's Smart Video clips, including every result page."""
+    records, page = [], 1
+    while True:
+        listing = ms3.call("GET", "/pipeline/records",
+                          query={"pipeline_uuid": uuid_, "record_type": "eventrec", "page": page, "size": 50})
+        for record in listing["records"]:
+            if record["pipeline_uuid"] != uuid_ or record["record_type"] != "eventrec":
+                raise CapacityError("record listing escaped the requested Smart Video pipeline scope")
+            records.append(record)
+        if page >= listing["pagination"]["max_page"]:
+            return records
+        page += 1
+
+
+def probe_smart_clip(ms3, record, config, ffprobe):
+    """Decode/count frames after the measurement window, without retaining scene footage."""
+    url = f"{ms3.base}/pipeline/record/{urllib.parse.quote(record['record_uuid'], safe='')}"
+    try:
+        result = subprocess.run([ffprobe, "-v", "error", "-count_frames", "-show_streams", "-show_format",
+                                 "-of", "json", url], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise CapacityError(f"Smart Video clip probe failed: {error}") from error
+    if result.returncode or result.stderr.strip():
+        raise CapacityError(f"Smart Video clip did not decode cleanly: {result.stderr.strip()[:300]}")
+    try:
+        data = json.loads(result.stdout)
+        stream = next(s for s in data["streams"] if s["codec_type"] == "video")
+        duration = float(data["format"]["duration"])
+        frames = int(stream["nb_read_frames"])
+        width, height = int(stream["width"]), int(stream["height"])
+    except (ValueError, KeyError, TypeError, StopIteration) as error:
+        raise CapacityError("Smart Video clip probe returned incomplete video metadata") from error
+    expected = (SMART_PRE_MS + SMART_POST_MS) / 1000
+    # Clip starts are keyframe-aligned; this checks total duration, not the exact trigger/frame alignment.
+    if not math.isfinite(duration) or abs(duration - expected) > 2 or frames < 1:
+        raise CapacityError(f"Smart Video clip has {frames} frames over {duration:g}s; expected {expected:g}s +/- 2s")
+    if (width, height) != config.tiler:
+        raise CapacityError(f"Smart Video clip dimensions {(width, height)} do not match {config.tiler}")
+    if stream.get("codec_name") != "h264":
+        raise CapacityError(f"Smart Video clip must contain H.264; got {stream.get('codec_name')}")
+    return {"record_uuid": record["record_uuid"], "duration_seconds": duration, "decoded_frames": frames,
+            "decoded_fps": frames / duration, "fps_pass": frames / duration >= PASS_FPS,
+            "width": width, "height": height, "codec": stream["codec_name"]}
+
+
+def verify_smart_recordings(ms3, uuid_, config, triggers, ffprobe, *, deadline=60):
+    if not triggers:
+        raise CapacityError("Smart Video recording was enabled but never triggered")
+    end = time.monotonic() + deadline
+    while True:
+        records = smart_records(ms3, uuid_)
+        if len({record["record_uuid"] for record in records}) >= len(triggers):
+            return [probe_smart_clip(ms3, record, config, ffprobe) for record in records]
+        if time.monotonic() >= end:
+            raise CapacityError(f"Smart Video produced {len(records)} clips for {len(triggers)} triggers")
+        time.sleep(2)
+
+
+def delete_smart_recordings(ms3, uuid_, *, deadline=60):
+    """Wait for async deletion before letting the ownership ledger disappear."""
+    ms3.call("POST", "/pipeline/records/deletion", query={"pipeline_uuid": uuid_, "record_type": "eventrec"},
+             ok=GONE_OK)
+    end = time.monotonic() + deadline
+    while smart_records(ms3, uuid_):
+        if time.monotonic() >= end:
+            raise CapacityError("Smart Video clips remain after the deletion request")
+        time.sleep(2)
 
 
 def delete_medias(ms3, pks, *, rounds=3):
@@ -609,11 +712,11 @@ def teardown(ms3, signaling, uuid_, config):
             if error.status != 422 or "E3307" not in str(error.payload):
                 raise
 
-    attempt("stopping the pipeline", stop_pipeline)
+    if not attempt("stopping the pipeline", stop_pipeline):
+        return errors
     if config.eventrec:
-        attempt("deleting event recordings",
-                lambda: ms3.call("POST", "/pipeline/records/deletion", query={"pipeline_uuid": uuid_},
-                                 ok=GONE_OK))
+        if not attempt("deleting Smart Video recordings", lambda: delete_smart_recordings(ms3, uuid_)):
+            return errors
     attempt("deleting the pipeline",
             lambda: ms3.call("DELETE", f"/pipeline/{uuid_}", query={"force": "true"}, ok=GONE_OK))
     return errors
@@ -641,7 +744,7 @@ class Session:
 
     def __init__(self, ms3, aip, model, ledger, *, signaling=None, verified=True, run=None, warmup=WARMUP_SECONDS,
                  window=WINDOW_SECONDS, interval=SAMPLE_SECONDS, containers=CONTAINERS, tegrastats=None,
-                 log=print):
+                 log=print, device="unspecified", ffprobe="ffprobe"):
         self.ms3, self.signaling, self.aip, self.model, self.ledger = ms3, signaling, aip, model, ledger
         self.verified = verified
         self.run = run or new_run_id()
@@ -649,10 +752,11 @@ class Session:
         self.containers, self.tegrastats, self.log = containers, tegrastats, log
         self.media = []
         self.trials = 0
+        self.device, self.ffprobe = device, ffprobe
 
     def provenance(self):
         return {"run": self.run, "aip": aip_identity(self.aip), "model_verified": self.verified,
-                "fps_metric": PERF_METRIC}
+                "fps_metric": PERF_METRIC, "device": self.device, "protocol": PROTOCOL}
 
     def create_media(self, template, count, tag):
         """Register `count` cameras from the RTSP template. Refuses to adopt cameras that already exist."""
@@ -683,17 +787,21 @@ class Session:
         self.media = []
         return list(failed.values())
 
-    def sample(self, uuid_, config, samples):
+    def sample(self, uuid_, config, samples, triggers=None):
         """Append samples as they arrive, retaining partial evidence if polling fails."""
         begin, clock = time.time(), time.monotonic()
         trigger_at = clock
         while time.monotonic() - clock < self.window:
             if config.eventrec and time.monotonic() >= trigger_at:
                 try:
-                    self.ms3.call("POST", f"/pipeline/{uuid_}/eventrec/trigger")
+                    response = self.ms3.call("POST", f"/pipeline/{uuid_}/eventrec/trigger")
+                    if not isinstance(response, dict) or response.get("status") not in (200, 201):
+                        raise CapacityError(f"Smart Video trigger was not acknowledged: {response}")
+                    if triggers is not None:
+                        triggers.append({"t": round(time.monotonic() - clock, 3), "response": response})
                 except CapacityError as error:
                     raise CapacityError(f"event recording trigger failed: {error}") from error
-                trigger_at += 30
+                trigger_at += SMART_TRIGGER_SECONDS
             sample = sample_from(self.ms3.call("GET", f"/pipeline/{uuid_}/inputs/fps"),
                                  self.ms3.call("GET", f"/pipeline/{uuid_}/fps"),
                                  self.ms3.call("GET", f"/pipeline/{uuid_}/status"),
@@ -705,12 +813,16 @@ class Session:
 
     def trial(self, count, config):
         """One pipeline with `count` cameras: start, settle, sample, tear down. Returns the trial record."""
+        validate_live_profile(config)
         self.trials += 1
         name = f"{NAME_PREFIX}{self.run}-{self.model}-{config.name}-n{count}-t{self.trials:02d}"
         record = {"kind": "trial", "model": self.model, "profile": config.name, "n": count, "pipeline": name,
                   "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **self.provenance(),
                   "warmup_seconds": self.warmup, "window_seconds": self.window,
-                  "interval_seconds": self.interval, "samples": []}
+                  "interval_seconds": self.interval, "samples": [], "output_settings": asdict(config),
+                  "smart_video": ({"pre_duration_ms": SMART_PRE_MS, "post_duration_ms": SMART_POST_MS,
+                                   "max_duration_ms": SMART_MAX_MS, "trigger_interval_seconds": SMART_TRIGGER_SECONDS,
+                                   "triggers": [], "clips": []} if config.eventrec else None)}
         uuid_ = None
         try:
             if not 1 <= count <= len(self.media):
@@ -724,7 +836,8 @@ class Session:
             self.log(f"  n={count} {config.name}: settling for {self.warmup:g} s")
             time.sleep(self.warmup)
             samples = record["samples"]
-            begin, end = self.sample(uuid_, config, samples)
+            triggers = record["smart_video"]["triggers"] if config.eventrec else None
+            begin, end = self.sample(uuid_, config, samples, triggers)
             record["sample_start_unix"], record["sample_end_unix"] = begin, end
             record["containers_cpu_percent"] = container_cpu(self.containers)
             record.update(evaluate(samples, count))
@@ -733,10 +846,15 @@ class Session:
             record["pipeline_fps_mean"] = round(statistics.fmean(sample["pipeline_fps"] for sample in samples), 2)
             if self.tegrastats is not None:
                 record["tegrastats"] = self.tegrastats.between(begin, end)
-            if config.recording:
-                record["recording_files"] = len(recording_files(self.signaling, uuid_))
-                if not record["recording_files"]:
-                    raise CapacityError("continuous recording wrote no file")
+            if config.eventrec:
+                record["smart_video"]["clips"] = verify_smart_recordings(
+                    self.ms3, uuid_, config, triggers, self.ffprobe)
+                for clip in record["smart_video"]["clips"]:
+                    if not clip["fps_pass"]:
+                        record["pass"] = False
+                        record["reasons"].append(
+                            f"Smart Video clip must contain H.264 at {PASS_FPS:g}+ decoded FPS; "
+                            f"got {clip['codec']} at {clip['decoded_fps']:g} FPS")
         except CapacityError as error:
             record.update(evaluate(record["samples"], count))
             record.update({"pass": False, "error": str(error)})
@@ -840,8 +958,16 @@ def supported_capacity(trials):
 
 def summarize(records):
     """Markdown tables: the supported capacity per model and profile, the fixed-N runs, and the AIPs used."""
+    contexts = {(r.get("device", "historical EX5"), r.get("protocol", "historical"))
+                for r in records if r["kind"] in ("trial", "fixed", "capacity")}
+    if len(contexts) > 1:
+        return "\n\n".join(
+            f"Device: {device}; protocol: {protocol}\n" + summarize([
+                r for r in records if (r.get("device", "historical EX5"), r.get("protocol", "historical")) ==
+                (device, protocol)]) for device, protocol in sorted(contexts))
     capacities = [record for record in records if record["kind"] == "capacity"]
-    lines = []
+    lines = [f"Device: {device}; protocol: {protocol}" for device, protocol in sorted(contexts)
+             if protocol != "historical"]
 
     def identity(record):
         aip = record.get("aip") or {}
@@ -921,7 +1047,7 @@ def describe(profile):
     """A profile in words, for example 'continuous recording + WebRTC + OSD, 1 Mbps'."""
     config = parse_profile(profile)
     outputs = [label for label, on in (("continuous recording", config.recording), ("WebRTC", config.webrtc),
-                                       ("HLS", config.hls), ("event recording", config.eventrec)) if on]
+                                       ("HLS", config.hls), ("Smart Video recording", config.eventrec)) if on]
     text = " + ".join(outputs) or "no output"
     if config.osd:
         text += " + OSD"
@@ -939,6 +1065,7 @@ def capitalized(text):
 def valid_trials(records):
     """Searched and fixed-count trials without setup, API or cleanup errors, by (camera set, model, profile)."""
     grouped = {}
+    contexts = set()
     for record in records:
         if record["kind"] not in ("trial", "fixed"):
             continue
@@ -947,6 +1074,9 @@ def valid_trials(records):
             require_valid_trial(trial)
         except CapacityError:
             continue
+        contexts.add((record.get("device", "historical EX5"), record.get("protocol", "historical")))
+        if len(contexts) > 1:
+            raise CapacityError("select one device and comparison protocol before generating a published table")
         key = (record.get("camera_tag", "unknown"), record["model"], record["profile"])
         grouped.setdefault(key, []).append(trial)
     return grouped
@@ -997,9 +1127,11 @@ def headroom_table(records, models=MODELS, camera_tag="720p", profiles=None):
     return "\n".join(lines)
 
 
-def screening_table(records, stage="screening"):
+def screening_table(records, stage="screening", profiles=None):
     """One row per fixed-count screening run: which outputs, the slowest camera and the GPU load."""
-    runs = [record for record in records if record["kind"] == "fixed" and record.get("stage") == stage]
+    profiles = SCREENING if profiles is None else profiles
+    runs = [record for record in records if record["kind"] == "fixed" and record.get("stage") == stage
+            and record["profile"] in profiles]
     lines = ["| Model | Cameras | Outputs | Slowest camera FPS | Mean GPU busy |", "|---|---:|---|---:|---:|"]
     for record in runs:
         trial = record["trial"]
@@ -1017,32 +1149,34 @@ def full_factorial():
     """Every combination of the factors the question lists, before and after removing the ones that cannot differ."""
     cells = set()
     total = 0
-    for osd, recording, delivery, eventrec, bitrate, tiler in product(
-            FACTORS["osd"], FACTORS["recording"], FACTORS["delivery"], FACTORS["event recording"],
+    for osd, delivery, eventrec, bitrate, tiler in product(
+            FACTORS["osd"], FACTORS["delivery"], FACTORS["Smart Video recording"],
             FACTORS["delivery bitrate"], FACTORS["output resolution"]):
         total += 1
-        cells.add(normalize(Config(recording=recording, webrtc=delivery == "webrtc", hls=delivery == "hls",
+        cells.add(normalize(Config(webrtc=delivery == "webrtc",
                                    eventrec=eventrec, osd=osd, bitrate=bitrate, tiler=tiler)))
     cameras, models = len(FACTORS["camera resolution"]), len(MODELS)
     return {"raw": total * cameras * models, "distinct": len(cells) * cameras * models}
 
 
-SCREENING = ("base", "rec", "webrtc", "webrtc-osd", "hls", "hls-osd", "evt", "evt-osd", "rec+webrtc-osd",
+SCREENING = ("base", "webrtc", "webrtc-osd", "evt", "evt-osd", "webrtc+evt-osd",
              "webrtc-osd-1M", "webrtc-osd-4M", "webrtc-osd-640x360", "webrtc-osd-1920x1080")
-CAPACITY_PROFILES = ("rec+webrtc-osd", "rec+webrtc+hls+evt-osd")
+CAPACITY_PROFILES = ("webrtc-osd", "evt-osd", "webrtc+evt-osd")
 CAMERA_PROBES = 2
 
 
 def plan():
     """The staged, pruned plan as rows of (stage, what, searches, single runs)."""
     return [
-        ("0 Pilot", "One camera, one model: deployed-form AIP, parser, outputs and harness work", 0, 2),
+        ("0 Pilot", "One camera per model and profile: inference, WebRTC publisher, Smart Video clips",
+         0, len(MODELS) * (1 + len(CAPACITY_PROFILES))),
         ("1 Baseline", "Capacity search per model with no output (decode + inference + tracker)", len(MODELS), 0),
         ("2 Screening", f"One reference model at its baseline capacity: {len(SCREENING)} single runs, one factor at a "
                         "time (outputs, OSD, bitrate, output resolution)", 0, len(SCREENING)),
-        ("3 Capacity", f"Capacity search per model for {len(CAPACITY_PROFILES)} profiles: typical and worst case",
+        ("3 Capacity", "Capacity search per model: WebRTC, Smart Video, and both (OSD on)",
          len(MODELS) * len(CAPACITY_PROFILES), 0),
-        ("4 Check", "Predict the other profiles from the screening, then search the one with the largest gap", 1, 0),
+        ("4 Check", "Independent rechecks at each passing boundary and the next camera count",
+         0, 2 * len(MODELS) * (1 + len(CAPACITY_PROFILES))),
         ("5 Cameras", "Camera resolution probes (720p against 1080p) at baseline", 0, CAMERA_PROBES),
     ]
 
@@ -1056,6 +1190,9 @@ def plan_totals():
 
 def print_plan():
     factorial = full_factorial()
+    print("Per device: EX5 and EX3 must be measured separately. No HLS or continuous recording.")
+    print(f"Smart Video: {SMART_PRE_MS / 1000:g}s pre-roll, {SMART_POST_MS / 1000:g}s post-roll, "
+          f"trigger every {SMART_TRIGGER_SECONDS}s; decode and verify clips after sampling.")
     print("Factors:", ", ".join(f"{name} x{len(values)}" for name, values in FACTORS.items()))
     print(f"Every combination: {factorial['raw']} cells; {factorial['distinct']} once settings that cannot "
           f"differ are merged; each cell is a search of about {SEARCH_TRIALS} trials of about {TRIAL_MINUTES} min "
@@ -1073,6 +1210,7 @@ def print_plan():
 @contextmanager
 def open_session(args, config, cameras, *, exact):
     """A Session with `cameras` registered cameras, or as many as the AIP accepts unless `exact`; deleted on exit."""
+    validate_live_profile(config)
     if cameras < 1:
         raise CapacityError("camera count must be positive")
     if (not all(math.isfinite(value) for value in (args.warmup, args.window, args.interval))
@@ -1080,10 +1218,10 @@ def open_session(args, config, cameras, *, exact):
         raise CapacityError("timings must be finite: warmup >= 0 and 0 < interval <= window")
     if getattr(args, "first", None) is not None and not 1 <= args.first <= cameras:
         raise CapacityError("--first must be within the camera search range")
+    if config.eventrec and shutil.which(args.ffprobe) is None:
+        raise CapacityError("Smart Video trials require ffprobe to decode and verify the resulting clips")
     ms3 = Api(args.ms3)
-    signaling = Api(args.signaling) if args.signaling else None
-    if config.recording and signaling is None:
-        raise CapacityError("continuous recording is started through the signaling service; pass --signaling")
+    preflight(ms3, config)
     aip = find_aip(ms3, args.aip)
     verified = model_matches(aip, args.model)
     if not verified:
@@ -1105,7 +1243,7 @@ def open_session(args, config, cameras, *, exact):
     with open(args.out, "a"):
         pass
     with Tegrastats() as tegrastats:
-        session = Session(ms3, aip, args.model, ledger, signaling=signaling, verified=verified,
+        session = Session(ms3, aip, args.model, ledger, verified=verified, device=args.device, ffprobe=args.ffprobe,
                           warmup=args.warmup, window=args.window, interval=args.interval,
                           containers=tuple(name for name in args.containers.split(",") if name),
                           tegrastats=tegrastats)
@@ -1162,23 +1300,36 @@ def command_plan(args):
     print_plan()
 
 
+def command_preflight(args):
+    config = parse_profile(args.profile)
+    validate_live_profile(config)
+    preflight(Api(args.ms3), config)
+    print("OK: required API routes exist and existing pipelines are stopped. "
+          "Fresh per-camera metrics and working outputs still require a deployment pilot.")
+
+
 def parser():
     top = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = top.add_subparsers(dest="command", required=True)
     commands.add_parser("plan", help="print the pruned plan and what it saves").set_defaults(run=command_plan)
+    probe = commands.add_parser("preflight", help="check station routes and workload without creating resources")
+    probe.add_argument("--ms3", required=True)
+    probe.add_argument("--profile", default="webrtc+evt-osd")
+    probe.set_defaults(run=command_preflight)
 
     def station(sub):
         sub.add_argument("--ms3", required=True, help="video-streaming API base URL, e.g. http://MS3:8000")
-        sub.add_argument("--signaling", help="signaling API base URL, e.g. http://SIGNALING:3001/signaling; "
-                                             "needed by profiles with continuous recording (rec)")
+        sub.add_argument("--device", required=True, help="public hardware/power-mode label, e.g. ex3-orin-nano-8gb-15w")
+        sub.add_argument("--ffprobe", default="ffprobe", help="ffprobe executable for Smart Video clip validation")
         sub.add_argument("--model", required=True, choices=MODELS)
         sub.add_argument("--aip", required=True, help="unique ID of the AIP built for this model")
         sub.add_argument("--unverified-model", action="store_true",
                          help="measure even when the AIP's name and model do not match --model")
         sub.add_argument("--rtsp-template", required=True, help="camera URL with an {index} placeholder")
-        sub.add_argument("--camera-tag", default="1080p",
+        sub.add_argument("--camera-tag", default="720p",
                          help="label for the camera set (media are named cap-RUN-TAG-NN)")
-        sub.add_argument("--profile", default="base", help="output profile, for example base or rec+webrtc-osd")
+        sub.add_argument("--profile", default="base",
+                         help="base, webrtc-osd, evt-osd (Smart Video), or webrtc+evt-osd")
         sub.add_argument("--max-n", type=int, default=DEFAULT_MAX_N)
         sub.add_argument("--warmup", type=float, default=WARMUP_SECONDS, help="seconds to settle before sampling")
         sub.add_argument("--window", type=float, default=WINDOW_SECONDS, help="seconds of sampling")
