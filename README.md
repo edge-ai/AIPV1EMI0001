@@ -22,7 +22,9 @@ YOLO26n is the default and a good first build. YOLOv10n scored almost identicall
 
 Measured on one **EX5 / Jetson Orin NX 16 GB** (JetPack 6.0, TensorRT 8.6, FP16 engines) from 17 to 19 November 2026. Accuracy uses all 5,000 COCO val2017 images; the authors' published score is in brackets. Inference time is for one image on an idle GPU, without decoding or tracking. A camera count passed when every 30 FPS H.264 camera averaged at least **29 processed FPS**. 1080p cameras without output gave the same counts.
 
-The [comparison notebook](notebooks/04-compare-models.ipynb) explains the accuracy, latency and [EX5 camera counts](doc/benchmarks/orin-nx-16gb-jp6.0/capacity.md). The [EX3/EX5 matrix](doc/benchmarks/capacity/README.md) covers **No output, WebRTC, Smart Video, and WebRTC + Smart Video**. On the [patched EX3](doc/benchmarks/orin-nano-8gb-jp6.0/capacity.md#patched-stack-results), the no-output limits were **5 / 5 / 3** cameras in the same model order; YOLO26n did not reliably sustain six. With video output enabled, detection stayed near 30 FPS, but delivered video failed the quality requirements even with one camera. That is **not a one-camera detection limit**. EX5 output profiles remain unmeasured under the current delivery-quality checks; EX3 measurements must not be substituted for them.
+The [comparison notebook](notebooks/04-compare-models.ipynb) explains the accuracy, latency and [EX5 camera counts](doc/benchmarks/orin-nx-16gb-jp6.0/capacity.md). On the [patched EX3](doc/benchmarks/orin-nano-8gb-jp6.0/capacity.md#patched-stack-results), YOLO26n and YOLOv10n each sustained **5 cameras** without video output; YOLOv7-tiny sustained **3**.
+
+The [EX3/EX5 matrix](doc/benchmarks/capacity/README.md) also covers WebRTC, Smart Video recording, and both together. With one EX3 camera, detection stayed near 30 FPS but the streamed or recorded video fell short of the quality requirements. EX5 has not been measured with those delivery checks.
 
 ## Get started
 

@@ -910,12 +910,11 @@ class CapacityPlanTests(unittest.TestCase):
         self.assertTrue(successes and failures)
 
     def test_capacity_artifacts_contain_no_private_station_references(self):
-        for name in ("capacity/README.md", "orin-nx-16gb-jp6.0/capacity.md",
-                     "capacity/preflight-2026-11-24.json",
-                     "orin-nx-16gb-jp6.0/capacity.jsonl", "orin-nx-16gb-jp6.0/capacity-outputs.json"):
-            with self.subTest(file=name):
-                text = (ROOT / "doc/benchmarks" / name).read_text()
-                assert_no_private_references(self, text, name)
+        root = ROOT / "doc/benchmarks"
+        for path in [root / "capacity/README.md", *sorted(root.glob("orin-*/capacity.*")),
+                     *sorted(root.glob("orin-*/capacity-*.json*"))]:
+            with self.subTest(file=path.name):
+                assert_no_private_references(self, path.read_text(), str(path.relative_to(root)))
 
 
 if __name__ == "__main__":

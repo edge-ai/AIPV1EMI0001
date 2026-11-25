@@ -1,7 +1,7 @@
 {
   "scope": "YOLO26n WebRTC diagnostics, separate from the 120-second capacity searches.",
   "method": "30-second warm-up, up to 90-second FPS sampling; RTSP ffprobe and frame extraction, not a WebRTC browser viewer or protocol-v2 delivery qualification.",
-  "redactions": "Excluded output-profile checks removed as whole records. All successful and failed WebRTC-only checks retained unchanged. Docker stderr and private diagnostic-frame filenames omitted. source_sha256 identifies the original unfiltered input files, not this selected export.",
+  "redactions": "Docker stderr and diagnostic-frame filenames are omitted. source_sha256 identifies the original input files, not this WebRTC subset.",
   "source_sha256": {
     "verify-probes.jsonl": "6e956d53cf7c277e8fbba13812c43a2fd31dbd663b48a903c8cb484575f45ba5",
     "verify.jsonl": "de7244bff81551ca935cf535e439cc8afa442f3cc99ee1fe64ba4031e5fb45b3"

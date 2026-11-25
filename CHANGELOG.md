@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- benchmark: Align EX3/EX5 and all three YOLO flavors on No output, WebRTC, Smart Video, and WebRTC + Smart Video; remove historical HLS/continuous-recording trials and diagnostics rather than relabeling them. Preserve retained measurements, distinguish detection capacity from video-quality failures, and document the matched recording-diagnostic follow-up that remains unrun
+- benchmark: Publish EX3 and EX5 camera counts for all three YOLO flavors. Report processed FPS separately from WebRTC delivery and Smart Video clip quality.
 - chore: Stop tracking the selected flavor's inference config and `config.pbtxt` copies; `tools/flavors.py use` and `bin/build.sh` generate them from `flavors/<id>/`, and the release workflow regenerates them and checks that the committed manifest, store metadata and weights license match
 - docs: Show every recorded result in the comparison notebook as text, so GitHub displays it without running code: accuracy, inference time, live camera counts with and without video outputs, output settings, what was not tested, and when each test ran
 - docs: Add 80-class mAP, inference time and EX5 no-output camera counts to the README results table, with test dates and links to the EX3/EX5 output-qualification matrix

@@ -52,8 +52,6 @@ SMART_POST_MS = 6000
 SMART_MAX_MS = 10000
 SMART_TRIGGER_SECONDS = 30
 PROTOCOL = "webrtc-smart-video-v2"
-# Output-quality limits (v2): delivered frames must keep the 29 FPS bar and no gap may exceed three frame intervals,
-# so an output that drops frames to protect inference cannot pass on inference FPS alone.
 MAX_FRAME_GAP_SECONDS = 3 / TARGET_FPS
 GAP_TOLERANCE_SECONDS = 0.005
 WEBRTC_PROBE_SECONDS = 20
@@ -61,8 +59,7 @@ WEBRTC_PROBE_SECONDS = 20
 WEBRTC_READ_URL = "rtsp://host.docker.internal:8554/{uuid}_{slot}"
 DEFAULT_TILER = (1280, 720)
 NAME_PREFIX = "cap-"
-# ms3 MTX_SLOT_ROLES: slot 1 records, slot 2 serves WebRTC, slot 3 is RTMP. The signaling service starts slot 1
-# itself when it starts continuous recording.
+# Slot 2 is the MediaMTX source for the WebRTC publisher.
 WEBRTC_SLOT = 2
 # Teardown calls accept 404 so that repeating a teardown, as `cleanup` does, is harmless.
 GONE_OK = (200, 201, 202, 204, 404)
@@ -661,7 +658,7 @@ def gap_ok(gap):
 
 
 def start_webrtc_probe(ffprobe, uuid_, *, seconds=WEBRTC_PROBE_SECONDS, url=WEBRTC_READ_URL):
-    """Start reading the WebRTC slot like a viewer does; collect it with finish_webrtc_probe."""
+    """Read the publisher's H.264 packets over RTSP, without a browser viewer."""
     source = url.format(uuid=uuid_, slot=WEBRTC_SLOT)
     try:
         return subprocess.Popen([ffprobe, "-v", "error", "-rtsp_transport", "tcp", "-read_intervals", f"%+{seconds:g}",

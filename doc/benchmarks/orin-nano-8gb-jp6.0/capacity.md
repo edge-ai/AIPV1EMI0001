@@ -12,8 +12,7 @@ average at least 29 processed FPS over 120 seconds after a 45-second warm-up.
 OSD is enabled for output profiles. WebRTC was measured with the publisher
 running and **no connected viewer**. Smart Video is the UI-configured event
 recording feature, with 3 seconds pre-roll, 6 seconds post-roll, a 10-second
-maximum buffer and one trigger every 30 seconds. HLS and continuous recording
-were not tested.
+maximum buffer and one trigger every 30 seconds.
 
 | Model | No output | WebRTC | Smart Video | WebRTC + Smart Video |
 |---|---:|---|---:|---|
@@ -44,21 +43,14 @@ valid clips. YOLOv10n passed a one-camera pilot but failed a later one-camera
 clip check; its four- and five-camera boundary checks also failed. YOLO26n
 passed one short pilot, but the long-window one-camera test failed at 28.64
 FPS; its two-camera trial failed the clip check and its four- and five-camera
-rechecks failed processed FPS. Treat these as contested outcomes, not as proof
-that combined output is impossible.
+rechecks fell below 29 processed FPS.
 
 ## Patched-stack results
 
-Two campaigns on 25 November repeated the comparison on the same EX3 with
-two changes to `ms3-36.3.0-v0.31.0`: slow outputs could drop frames instead
-of blocking inference, and Smart Video started each clip on a keyframe
-without discarding the following frames. These are not stock-image results.
-
-The tested build is labeled
-`v0.31.0+output.5c2417a0+recording.c8c19098`; it combines changes from
-[edge-ai/aibox-webserver-backend-ms3#967](https://github.com/edge-ai/aibox-webserver-backend-ms3/pull/967)
-and [edge-ai/gst-plugins-emi#28](https://github.com/edge-ai/gst-plugins-emi/pull/28).
-Those platform fixes are separate from this AIP's benchmark changes.
+Two runs on 25 November used the same EX3 with streaming service build
+`v0.31.0+output.5c2417a0+recording.c8c19098`. This build allows slow outputs
+to drop frames instead of blocking inference and changes how Smart Video
+starts a clip on a keyframe.
 
 The no-output pass rule was unchanged. **Both v1 and v2 require at least
 29 decoded FPS for every Smart Video clip.** Protocol `webrtc-smart-video-v2`
@@ -73,9 +65,8 @@ both software and checks; it does not isolate the effect of the output patch.
 | YOLOv10n | **5** | Not qualified at 1 | Not qualified at 1 | Not qualified at 1 |
 | YOLOv7-tiny | **3** | Not qualified at 1 | Not qualified at 1 | Not qualified at 1 |
 
-**Not qualified at 1** means video quality failed with one camera, not that
-detection supports only one camera or cannot run. No passing output capacity
-was established. The no-output counts remain independently qualified.
+**Not qualified at 1** means the delivered video failed the one-camera check.
+It does not limit the no-output camera counts.
 
 With outputs enabled, inference stayed near 30 FPS per camera, but the video
 did not keep up. Across the two campaigns, the MediaMTX stream delivered
@@ -106,15 +97,9 @@ pictures (271 expected). Their packet counts equal the decoded-frame counts:
 pictures are missing in the files, not merely slow to decode. Every clip
 started on a keyframe; the largest gap was 100 ms.
 
-The output patch allows a slow branch to discard raw frames rather than stall
-inference. This explains how detection can remain fast while recording loses
-pictures; the campaign has no synchronized per-stage trace to establish
-whether these losses came from bursts or sustained downstream overload.
-Do not call the patch a proven overall improvement or attribute the deficit
-to the encoder alone. Keep the separate keyframe fix and inference protection;
-the [matched diagnostic follow-up](../capacity/README.md#recording-diagnostic-follow-up-not-a-capacity-result)
-is still unrun. EX5 NVENC tests of another model are not evidence that these
-YOLO output profiles pass on EX5.
+These measurements show that the saved clips contain fewer frames than
+expected. They do not identify where in the recording pipeline the frames
+were lost.
 
 ### Why YOLO26n is rated for five cameras, not six
 
@@ -180,20 +165,10 @@ least 29 processed FPS per camera. Smart Video clips were decoded and checked
 after sampling to avoid perturbing the FPS window. WebRTC used a 1280x720
 mosaic at 2 Mbps; Smart Video used 4 Mbps. No browser viewer was connected.
 
-The sanitized [`capacity.jsonl`](capacity.jsonl) contains 81 pilot, search,
-and independent boundary records, including failed attempts. It omits sample-
-by-sample telemetry and internal station identifiers; aggregate per-camera
-FPS, CPU/GPU utilization, output settings, clip properties, timestamps and
-failure reasons are retained. The campaign was limited to the AIPs' eight
-input maximum; it did not test 1080p.
-
-The initial read-only preflight is retained at
-[`../capacity/preflight-2026-11-24.json`](../capacity/preflight-2026-11-24.json).
-It predates the station upgrade and is not the test software version. Test
-pipeline resources were cleaned up: no benchmark-owned pipeline configurations
-or ownership ledgers remained. The isolated test AIPs remain registered for
-reuse. Existing station services and unrelated pipeline configurations were
-left untouched.
+The [released-stack dataset](capacity.jsonl) contains 81 pilot, search,
+and boundary records, including failed attempts. Records include per-camera
+mean FPS, CPU/GPU utilization, output settings, clip properties and failure
+reasons. The search was limited to the AIP's maximum of eight inputs.
 
 The [capacity matrix](../capacity/README.md) compares these results with EX5.
 EX5 output profiles have not been remeasured under this protocol, and EX3

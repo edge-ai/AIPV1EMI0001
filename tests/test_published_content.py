@@ -120,8 +120,6 @@ class PublishedContentTests(unittest.TestCase):
             headers = [line.lower() for line in text.splitlines() if line.startswith("|")]
             self.assertFalse(any("continuous recording" in line or "hls" in line or "all outputs" in line
                                  for line in headers))
-        self.assertIn("pre/post", comparison)
-        self.assertIn("EX5 output profiles remain unmeasured", comparison)
         self.assertFalse((RESULTS / "capacity-historical.md").exists())
 
     def test_retained_benchmark_evidence_contains_only_supported_profiles(self):
@@ -174,12 +172,12 @@ class PublishedContentTests(unittest.TestCase):
         table = capacity.camera_table(
             records, self.by_id.keys(),
             [("720p", profile) for profile in ("base", "webrtc-osd", "evt-osd", "webrtc+evt-osd")])
-        self.assertIn("contains 81 pilot, search,", report)
-        self.assertIn("capacity.jsonl", report)
+        self.assertIn(f"{len(records)} pilot, search,", report)
+        self.assertIn("](capacity.jsonl)", report)
         self.assertIn("| YOLO26n | 5 | Not qualified at 1 | 3† | Not qualified at 1 |", table)
         self.assertIn("WEBRTC + SMART VIDEO", report.upper())
-        self.assertIn("released EX3 baseline", matrix)
-        self.assertIn("released EX3 baseline", comparison)
+        for text in (matrix, comparison):
+            self.assertIn("capacity.md#released-stack-results-24-november-2026)", text)
         self.assertEqual({(row["device"], row["protocol"]) for row in records},
                          {("ex3-orin-nano-8gb-15w", "webrtc-smart-video-v1")})
         self.assertEqual({row["model"] for row in records if row["kind"] in {"trial", "fixed"}},
@@ -325,8 +323,7 @@ class ComparisonNotebookTests(unittest.TestCase):
         for text in (f"| Accuracy | {span(accuracy)} |", f"| Inference time | {span(latency)} |",
                      f"| Camera capacity (EX5) | {span(cameras)} | {len(trials)} live RTSP trials",
                      f"| Camera capacity (EX3) | {span(ex3_cameras)} | 720p, WebRTC and Smart Video tests",
-                     f"| Output checks | {span(outputs)} | {len(checks)} YOLO26n WebRTC-only output diagnostics |",
-                     "Released EX3 capacity was measured 24 November 2026 under protocol v1"):
+                     f"| Output checks | {span(outputs)} | {len(checks)} YOLO26n WebRTC-only output diagnostics |"):
             with self.subTest(text=text):
                 self.assertIn(text, self.text)
 
