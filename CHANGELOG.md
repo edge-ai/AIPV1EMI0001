@@ -2,10 +2,10 @@
 
 ## Unreleased
 
-- benchmark: Restrict new output trials to WebRTC and triggered Smart Video recording with explicit pre/post times and clip checks; retain the old EX5 evidence as historical, remove unsupported output capacity claims, and document EX3/EX5 live-test prerequisites
+- benchmark: Align EX3/EX5 and all three YOLO flavors on No output, WebRTC, Smart Video, and WebRTC + Smart Video; remove historical HLS/continuous-recording trials and diagnostics rather than relabeling them. Preserve retained measurements, distinguish detection capacity from video-quality failures, and document the matched recording-diagnostic follow-up that remains unrun
 - chore: Stop tracking the selected flavor's inference config and `config.pbtxt` copies; `tools/flavors.py use` and `bin/build.sh` generate them from `flavors/<id>/`, and the release workflow regenerates them and checks that the committed manifest, store metadata and weights license match
 - docs: Show every recorded result in the comparison notebook as text, so GitHub displays it without running code: accuracy, inference time, live camera counts with and without video outputs, output settings, what was not tested, and when each test ran
-- docs: Add 80-class mAP, inference time and camera counts with all video outputs to the README results table, with the test dates
+- docs: Add 80-class mAP, inference time and EX5 no-output camera counts to the README results table, with test dates and links to the EX3/EX5 output-qualification matrix
 - docs: Explain that the three flavors are build recipes for one AI Processor and that the top-level `configs/` and `models/` hold the selected flavor
 - docs: Replace the Mermaid diagrams, which GitHub doesn't render in notebooks, with an SVG pipeline diagram and a one-line build flow
 - test: Generate the published camera, headroom and output-screening tables from `capacity.jsonl` and check that the README and the comparison notebook quote them

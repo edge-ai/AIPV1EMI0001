@@ -17,9 +17,9 @@ were not tested.
 
 | Model | No output | WebRTC | Smart Video | WebRTC + Smart Video |
 |---|---:|---|---:|---|
-| YOLO26n | **5** | Fails at 1 camera | **3†** | Unstable |
-| YOLOv10n | **5** | Fails at 1 camera | **4†** | Unstable |
-| YOLOv7-tiny | **3** | Fails at 1 camera | **3** | **1†** |
+| YOLO26n | **5** | Inference below target at 1 | **3†** | Unstable |
+| YOLOv10n | **5** | Inference below target at 1 | **4†** | Unstable |
+| YOLOv7-tiny | **3** | Inference below target at 1 | **3** | **1†** |
 
 No-output counts passed a separate boundary recheck; the next count failed.
 For Smart Video, YOLOv7-tiny passed at three and failed at four. YOLOv10n
@@ -54,17 +54,28 @@ two changes to `ms3-36.3.0-v0.31.0`: slow outputs could drop frames instead
 of blocking inference, and Smart Video started each clip on a keyframe
 without discarding the following frames. These are not stock-image results.
 
-The no-output pass rule was unchanged. Protocol `webrtc-smart-video-v2`
-also checked the **delivered video**: at least 29 FPS from the WebRTC
-publisher's MediaMTX stream, at least 29 decoded FPS for each Smart Video
-clip, and no packet gap over 0.10 s (plus 5 ms timing tolerance) in either.
-Clips also had to start on a keyframe.
+The tested build is labeled
+`v0.31.0+output.5c2417a0+recording.c8c19098`; it combines changes from
+[edge-ai/aibox-webserver-backend-ms3#967](https://github.com/edge-ai/aibox-webserver-backend-ms3/pull/967)
+and [edge-ai/gst-plugins-emi#28](https://github.com/edge-ai/gst-plugins-emi/pull/28).
+Those platform fixes are separate from this AIP's benchmark changes.
+
+The no-output pass rule was unchanged. **Both v1 and v2 require at least
+29 decoded FPS for every Smart Video clip.** Protocol `webrtc-smart-video-v2`
+adds at least 29 delivered FPS from the WebRTC publisher's MediaMTX stream,
+keyframe starts for clips, and no packet gap over 0.10 s (plus 5 ms timing
+tolerance) for either output. A stock-v1 versus patched-v2 comparison changes
+both software and checks; it does not isolate the effect of the output patch.
 
 | Model | No output | WebRTC | Smart Video | WebRTC + Smart Video |
 |---|---:|---|---|---|
-| YOLO26n | **5†** | Fails at 1 camera | Fails at 1 camera | Fails at 1 camera |
-| YOLOv10n | **5** | Fails at 1 camera | Fails at 1 camera | Fails at 1 camera |
-| YOLOv7-tiny | **3** | Fails at 1 camera | Fails at 1 camera | Fails at 1 camera |
+| YOLO26n | **5†** | Not qualified at 1 | Not qualified at 1 | Not qualified at 1 |
+| YOLOv10n | **5** | Not qualified at 1 | Not qualified at 1 | Not qualified at 1 |
+| YOLOv7-tiny | **3** | Not qualified at 1 | Not qualified at 1 | Not qualified at 1 |
+
+**Not qualified at 1** means video quality failed with one camera, not that
+detection supports only one camera or cannot run. No passing output capacity
+was established. The no-output counts remain independently qualified.
 
 With outputs enabled, inference stayed near 30 FPS per camera, but the video
 did not keep up. Across the two campaigns, the MediaMTX stream delivered
@@ -74,6 +85,36 @@ decoded at 22.92–29.78 FPS. All started on a keyframe; the largest gap was
 The MediaMTX RTSP measurement is **not browser playback**. No browser viewer
 was connected and lower output resolutions, frame rates and bitrates were
 not tested.
+
+### What the recording failures mean
+
+For Smart Video alone with one camera, the two patched campaigns contain
+eight clips per model. Detection and saved-video rate differ:
+
+| Model | Processed FPS across runs | Decoded clip FPS | Clips below 29 FPS |
+|---|---:|---:|---:|
+| YOLO26n | 30.08-30.09 | 26.90-29.45 | 7/8 |
+| YOLOv10n | 30.12-30.14 | 26.79-29.00 | 7/8 |
+| YOLOv7-tiny | 30.09-30.12 | 26.13-28.78 | 8/8 |
+
+Rates in the table are rounded; pass/fail uses the full-precision values.
+For example, the YOLOv10n clip displayed as 29.00 is just above 29.
+Across the three models, **22 of 24 clips** were below target. In the
+[YOLO26n recheck](capacity-fixed-ms3-recheck.jsonl), detection ran at
+30.09 FPS while four 9.033333-second clips contained 253, 243, 247 and 256
+pictures (271 expected). Their packet counts equal the decoded-frame counts:
+pictures are missing in the files, not merely slow to decode. Every clip
+started on a keyframe; the largest gap was 100 ms.
+
+The output patch allows a slow branch to discard raw frames rather than stall
+inference. This explains how detection can remain fast while recording loses
+pictures; the campaign has no synchronized per-stage trace to establish
+whether these losses came from bursts or sustained downstream overload.
+Do not call the patch a proven overall improvement or attribute the deficit
+to the encoder alone. Keep the separate keyframe fix and inference protection;
+the [matched diagnostic follow-up](../capacity/README.md#recording-diagnostic-follow-up-not-a-capacity-result)
+is still unrun. EX5 NVENC tests of another model are not evidence that these
+YOLO output profiles pass on EX5.
 
 ### Why YOLO26n is rated for five cameras, not six
 

@@ -56,13 +56,20 @@ class CapacityProfileTests(unittest.TestCase):
         self.assertFalse(base["pipeline"]["hls_output_sink_setup"]["active"])
         self.assertFalse(base["pipeline"]["mtx_output_sink_setup"]["active"])
 
-    def test_historical_profiles_can_be_read_but_not_run(self):
+    def test_excluded_profiles_can_be_recovered_but_not_run_or_published(self):
         for name in ("rec", "hls", "rec+webrtc-osd", "rec+webrtc+hls+evt-osd"):
             with self.subTest(profile=name):
                 config = capacity.parse_profile(name)
-                self.assertTrue(capacity.describe(name))
-                with self.assertRaisesRegex(capacity.CapacityError, "historical-only"):
+                self.assertEqual(config.name, name)
+                with self.assertRaisesRegex(capacity.CapacityError, "excluded from benchmarks"):
                     capacity.pipeline_setup("test", config, {"pk": "aip"}, ["camera"])
+                record = {"kind": "trial", "profile": name, "model": "yolo26",
+                          "camera_tag": "720p", "n": 1, "min_fps": 30, "pass": True}
+                for render in (capacity.summarize, capacity.camera_table):
+                    with self.assertRaisesRegex(capacity.CapacityError, "excluded from benchmarks"):
+                        render([record])
+                with self.assertRaisesRegex(capacity.CapacityError, "excluded from benchmarks"):
+                    capacity.describe(name)
 
     def test_batch_size_caps_at_engine_maximum(self):
         body = capacity.pipeline_setup("test", capacity.Config(), {"pk": "aip-pk"},
@@ -578,7 +585,7 @@ class CapacitySessionTests(unittest.TestCase):
         self.assertIn("not YOLOv7-tiny", output)
         code, output = run("fixed", "--model", "yolo26", "--n", "1", "--profile", "rec", *common)
         self.assertEqual(code, 1)
-        self.assertIn("historical-only", output)
+        self.assertIn("excluded from benchmarks", output)
         self.assertFalse(out.exists())
 
         code, output = run("fixed", "--model", "yolo26", "--n", "2", *common)
@@ -790,19 +797,30 @@ class CapacityPlanTests(unittest.TestCase):
                      "n": n, "pass": passed, "min_fps": fps} for n, passed, fps in outcomes]
 
         records = [*run("base", ((6, True, 30.1), (7, True, 29.2), (7, False, 28.8))),
-                   *run("rec+webrtc-osd", ((6, True, 30.0), (7, False, 27.5)))]
+                   *run("webrtc+evt-osd", ((6, True, 30.0), (7, False, 27.5)))]
         self.assertEqual(capacity.describe("webrtc-osd-1M"), "WebRTC + OSD, 1 Mbps")
         table = capacity.camera_table(records, ("yolo26",),
-                                      [("720p", "base"), ("720p", "rec+webrtc-osd"), ("1080p", "base")])
-        self.assertIn("| Model | 720p, no output | 720p, continuous recording + WebRTC + OSD | 1080p, no output |",
+                                      [("720p", "base"), ("720p", "webrtc+evt-osd"), ("1080p", "base")])
+        self.assertIn("| Model | 720p, no output | 720p, WebRTC + Smart Video recording + OSD | 1080p, no output |",
                       table)
         self.assertIn("| YOLO26n | 6† | 6 | - |", table)
         self.assertIn("† A higher count passed in one trial and failed in another", table)
-        headroom = capacity.headroom_table(records, ("yolo26",), profiles=("base", "rec+webrtc-osd"))
+        headroom = capacity.headroom_table(records, ("yolo26",), profiles=("base", "webrtc+evt-osd"))
         self.assertIn("| YOLO26n | 7 | 29.20 (passed), 28.80 | 27.50 |", headroom)
         with self.assertRaises(capacity.CapacityError):
-            capacity.headroom_table([*records, *run("rec+webrtc+hls+evt-osd", ((5, True, 30.0), (6, False, 28.0)))],
-                                    ("yolo26",))
+            capacity.headroom_table([*records, *run("evt-osd", ((5, True, 30.0), (6, False, 28.0)))],
+                                    ("yolo26",), profiles=("base", "webrtc+evt-osd", "evt-osd"))
+
+    def test_output_failure_at_one_is_not_reported_as_a_camera_limit(self):
+        identity = {"model": "yolo26", "profile": "evt-osd", "camera_tag": "720p"}
+        records = [
+            {"kind": "capacity", **identity, "capacity": 0, "bounded": True},
+            {"kind": "trial", **identity, "n": 1, "pass": False, "min_fps": 30.09,
+             "reasons": ["Smart Video clip must contain H.264 at 29+ decoded FPS; got h264 at 26.9 FPS"]},
+        ]
+        table = capacity.camera_table(records, ("yolo26",), [("720p", "evt-osd"), ("1080p", "evt-osd")])
+        self.assertIn("| YOLO26n | Not qualified at 1 | - |", table)
+        self.assertIn("Not qualified at 1", capacity.summarize(records))
 
     def test_plan_covers_every_packaged_flavor_and_prunes_factorial(self):
         self.assertEqual(set(capacity.MODELS), set(flavors.flavor_ids(ROOT)))
@@ -848,8 +866,7 @@ class CapacityPlanTests(unittest.TestCase):
                     self.assertFalse(boundary[result["capacity"] + 1]["pass"])
         published = {"yolo26": 7, "yolov10": 6, "yolov7": 4}
         cells = [(camera_tag, model, profile) for model in published
-                 for camera_tag, profile in (("720p", "base"), ("720p", "rec+webrtc-osd"),
-                                             ("720p", "rec+webrtc+hls+evt-osd"), ("1080p", "base"))]
+                 for camera_tag, profile in (("720p", "base"), ("1080p", "base"))]
         for camera_tag, model, profile in cells:
             with self.subTest(camera=camera_tag, model=model, profile=profile):
                 evidence = [row["trial"] if row["kind"] == "fixed" else row for row in records
@@ -894,7 +911,7 @@ class CapacityPlanTests(unittest.TestCase):
 
     def test_capacity_artifacts_contain_no_private_station_references(self):
         for name in ("capacity/README.md", "orin-nx-16gb-jp6.0/capacity.md",
-                     "orin-nx-16gb-jp6.0/capacity-historical.md", "capacity/preflight-2026-11-24.json",
+                     "capacity/preflight-2026-11-24.json",
                      "orin-nx-16gb-jp6.0/capacity.jsonl", "orin-nx-16gb-jp6.0/capacity-outputs.json"):
             with self.subTest(file=name):
                 text = (ROOT / "doc/benchmarks" / name).read_text()

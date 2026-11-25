@@ -46,7 +46,6 @@ MODELS = tuple(MODEL_NAMES)
 ENGINE_MAX_BATCH = 8
 DEFAULT_MAX_N = 16
 DEFAULT_BITRATE = 2_000_000
-RECORDING_BITRATE = 3_000_000
 EVENTREC_BITRATE = 4_000_000
 SMART_PRE_MS = 3000
 SMART_POST_MS = 6000
@@ -95,7 +94,7 @@ class CapacityError(Exception):
 class Config:
     """What the pipeline does with the frames besides inference. Camera resolution is a property of the media."""
 
-    # Retained to read historical results and recover old ownership ledgers, never for new trials.
+    # Retained to recover old ownership ledgers, never for trials or published tables.
     recording: bool = False
     webrtc: bool = False
     hls: bool = False
@@ -156,7 +155,7 @@ def parse_profile(name):
 
 def validate_live_profile(config):
     if config.recording or config.hls:
-        raise CapacityError("HLS and continuous recording are historical-only; use base, webrtc, evt "
+        raise CapacityError("HLS and continuous recording are excluded from benchmarks; use base, webrtc, evt "
                             "(Smart Video recording), or webrtc+evt, optionally with -osd")
 
 
@@ -1037,6 +1036,9 @@ def supported_capacity(trials):
 
 def summarize(records):
     """Markdown tables: the supported capacity per model and profile, the fixed-N runs, and the AIPs used."""
+    for record in records:
+        if record["kind"] in ("trial", "fixed", "capacity"):
+            validate_live_profile(parse_profile(record["profile"]))
     contexts = {(r.get("device", "historical EX5"), r.get("protocol", "historical"))
                 for r in records if r["kind"] in ("trial", "fixed", "capacity")}
     if len(contexts) > 1:
@@ -1045,8 +1047,7 @@ def summarize(records):
                 r for r in records if (r.get("device", "historical EX5"), r.get("protocol", "historical")) ==
                 (device, protocol)]) for device, protocol in sorted(contexts))
     capacities = [record for record in records if record["kind"] == "capacity"]
-    lines = [f"Device: {device}; protocol: {protocol}" for device, protocol in sorted(contexts)
-             if protocol != "historical"]
+    lines = [f"Device: {device}; protocol: {protocol}" for device, protocol in sorted(contexts)]
 
     def identity(record):
         aip = record.get("aip") or {}
@@ -1084,7 +1085,7 @@ def summarize(records):
                 trials = evidence.get((camera_tag, (model, unique_id, version, verified), profile), [])
                 found = supported_capacity(trials)
                 if found is None:
-                    cells.append("-" if not trials else "<" + str(min(trial["n"] for trial in trials)))
+                    cells.append("-" if not trials else f"Not qualified at {min(trial['n'] for trial in trials)}")
                     continue
                 count, bounded, contested = found
                 contested_any |= contested
@@ -1095,11 +1096,13 @@ def summarize(records):
             lines.append(f"| {label} | {unique_id} {version} | " + " | ".join(cells) + " |")
     if capacities:
         lines += ["", "Highest count with no failing trial at or below it, from searches and rechecks; "
-                  "≥ marks a count without a failing trial at the next count."]
+                  "≥ marks a count without a failing trial at the next count.",
+                  "Not qualified at N means the checks did not establish a passing capacity at that count, "
+                  "not that N cameras are supported. - means no measurements."]
         if contested_any:
             lines.append("† A higher count passed in at least one trial but failed in another.")
     if fixed:
-        lines += ["", "| Model | AIP | Camera set | Profile | Cameras | Min FPS | Pass | GPU % | CPU % | NVENC MHz | Bottleneck |",
+        lines += ["", "| Model | AIP | Camera set | Profile | Cameras | Min processed FPS | All checks pass | GPU % | CPU % | NVENC MHz | Highest mean utilization |",
                   "|---|---|---|---|---:|---:|---|---:|---:|---:|---|"]
         for record, valid in fixed:
             trial = record["trial"]
@@ -1111,6 +1114,8 @@ def summarize(records):
                 "invalid" if not valid else "yes" if trial["pass"] else "no",
                 *(measured.get(key, {}).get("mean", "-") for key in ("gpu_percent", "cpu_percent", "nvenc_mhz")),
                 bottleneck(trial)))
+        lines += ["", "Processed FPS is not delivered-video FPS. Passing requires all checks for that protocol; "
+                  "aggregate CPU/GPU utilization does not identify the stage causing a failure."]
     aips = sorted({identity(record)
                    for record in records if record["kind"] in ("capacity", "fixed") and record.get("aip")})
     if aips:
@@ -1123,10 +1128,10 @@ def summarize(records):
 # ---- Published tables (the comparison notebook quotes these) ----
 
 def describe(profile):
-    """A profile in words, for example 'continuous recording + WebRTC + OSD, 1 Mbps'."""
+    """A supported profile in words, for example 'WebRTC + OSD, 1 Mbps'."""
     config = parse_profile(profile)
-    outputs = [label for label, on in (("continuous recording", config.recording), ("WebRTC", config.webrtc),
-                                       ("HLS", config.hls), ("Smart Video recording", config.eventrec)) if on]
+    validate_live_profile(config)
+    outputs = [label for label, on in (("WebRTC", config.webrtc), ("Smart Video recording", config.eventrec)) if on]
     text = " + ".join(outputs) or "no output"
     if config.osd:
         text += " + OSD"
@@ -1148,6 +1153,7 @@ def valid_trials(records):
     for record in records:
         if record["kind"] not in ("trial", "fixed"):
             continue
+        validate_live_profile(parse_profile(record["profile"]))
         trial = record["trial"] if record["kind"] == "fixed" else record
         try:
             require_valid_trial(trial)
@@ -1174,7 +1180,7 @@ def camera_table(records, models=MODELS, columns=None):
             trials = grouped.get((column[0], model, column[1]), [])
             found = supported_capacity(trials)
             if found is None:
-                cells.append("-" if not trials else f"<{min(trial['n'] for trial in trials)}")
+                cells.append("-" if not trials else f"Not qualified at {min(trial['n'] for trial in trials)}")
                 continue
             count, bounded, contested = found
             contested_any |= contested

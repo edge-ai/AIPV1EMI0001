@@ -5,7 +5,7 @@
 | [`USER_MANUAL.md`](USER_MANUAL.md) | Install the package, deploy the Node-RED dashboard, and the callback metadata contract |
 | [`../notebooks/`](../notebooks/) | The tutorial: one presentation notebook, one build notebook per YOLO flavor, and the model comparison |
 | [Model measurements](benchmarks/orin-nx-16gb-jp6.0/comparison.md) | COCO detection accuracy and raw-model latency on the Orin NX 16 GB |
-| [RTSP camera capacity](benchmarks/orin-nx-16gb-jp6.0/capacity.md) | Processed FPS per camera with tracking, recording and video outputs; includes the limits of the tests |
+| [EX3/EX5 camera capacity](benchmarks/capacity/README.md) | All three YOLO flavors: No output, WebRTC, Smart Video, and both; detection capacity and delivered-video quality are separate requirements |
 | [`../src/nvdsinfer_customparser/README`](../src/nvdsinfer_customparser/README) | The DeepStream parser shared by the flavors |
 | [`../logic/README.md`](../logic/README.md) | The Node-RED project |
 | [`../dashboard/README.md`](../dashboard/README.md) | The dashboard application |

@@ -5,8 +5,10 @@ YOLO object detector for the EdgeAI Station: real-time detection of
 (region of interest) and LCC (line crossing counter) analytics. The package
 carries one detector, chosen at build time among YOLOv7-tiny, YOLOv10n and YOLO26n;
 the [model comparison](../notebooks/04-compare-models.ipynb) explains the differences.
-The manifest allows up to 8 inputs; [measured camera capacity](benchmarks/orin-nx-16gb-jp6.0/capacity.md)
-depends on the detector, frame rate and pipeline settings.
+The manifest allows up to 8 inputs; [measured EX3/EX5 camera capacity](benchmarks/capacity/README.md)
+depends on the detector, frame rate and pipeline settings. A video-quality failure
+is not a detection camera limit. The prebuilt EX5 engines and its accuracy/latency
+measurements do not qualify the same engine or performance on EX3.
 
 ## Requirements
 
@@ -55,11 +57,12 @@ Selection alone does not build an engine or install a package. The
 [YOLOv10n notebook](../notebooks/02-build-yolov10.ipynb) builds the engine,
 exports the package and shows how to verify the registered detector.
 
-The [camera benchmarks](benchmarks/orin-nx-16gb-jp6.0/capacity.md#test-conditions)
-used separate **test IDs** so the three builds could stay installed without
-replacing the existing AIP. Each trial ran just one detector. In that report a
-*profile* describes pipeline settings such as recording, OSD and streaming,
-not another AIP to install.
+The [camera benchmarks](benchmarks/capacity/README.md) use separate **test IDs**
+so the three builds can stay installed without replacing the existing AIP.
+Each trial runs just one detector on its target device. A *profile* means
+No output, WebRTC, Smart Video, or WebRTC + Smart Video, not another AIP to
+install; output profiles enable OSD. EX5 and EX3 results, and released and
+patched software results, are reported separately.
 
 ## Node-RED dashboard
 
