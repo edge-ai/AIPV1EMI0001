@@ -145,7 +145,7 @@ class CapacityEvaluationTests(unittest.TestCase):
 
     def test_settled_repeats_borderline_trials_and_uses_both_results(self):
         results = iter([
-            {"pass": True, "min_fps": 29.1, "reasons": []},
+            {"pass": True, "min_fps": 29.1, "reasons": [], "device": "ex3", "protocol": capacity.PROTOCOL},
             {"pass": False, "min_fps": 28.9, "reasons": ["camera 0 averaged 28.90 FPS"]},
         ])
         calls = []
@@ -160,6 +160,7 @@ class CapacityEvaluationTests(unittest.TestCase):
         self.assertEqual(result["min_fps"], 28.9)
         self.assertEqual(result["reasons"], ["repeat: camera 0 averaged 28.90 FPS"])
         self.assertEqual(len(result["attempts"]), 2)
+        self.assertEqual((result["device"], result["protocol"]), ("ex3", capacity.PROTOCOL))
         self.assertEqual(capacity.worst_attempt(result)["min_fps"], 28.9)
 
     def test_invalid_trial_is_not_repeated_or_treated_as_a_capacity_limit(self):
@@ -312,6 +313,12 @@ class CapacitySessionTests(unittest.TestCase):
             "duration_seconds": 9, "decoded_frames": 270, "decoded_fps": 30, "fps_pass": True, "codec": "h264"})
         probe.start()
         self.addCleanup(probe.stop)
+        for name, value in (("start_webrtc_probe", mock.Mock()),
+                            ("finish_webrtc_probe", mock.Mock(return_value={
+                                "delivered_fps": 30.0, "max_gap_seconds": 0.033, "pass": True}))):
+            patcher = mock.patch.object(capacity, name, value)
+            setattr(self, name, patcher.start())
+            self.addCleanup(patcher.stop)
 
     def session(self, **options):
         return capacity.Session(self.station, FakeStation.AIP, "yolo26", self.ledger, signaling=self.station,
@@ -384,6 +391,30 @@ class CapacitySessionTests(unittest.TestCase):
         self.assertEqual(record["smart_video"]["clips"][0]["decoded_frames"], 245)
         self.assertEqual(self.station.pipelines, {})
         self.assertFalse(self.station.records)
+
+    def test_smart_video_clip_with_a_skipped_gop_is_a_measured_failure(self):
+        with mock.patch.object(capacity, "probe_smart_clip", return_value={
+                "duration_seconds": 9, "decoded_frames": 271, "decoded_fps": 30.1, "fps_pass": True,
+                "codec": "h264", "max_gap_seconds": 0.966667, "first_packet_keyframe": True,
+                "continuity_pass": False}):
+            session = self.session()
+            session.create_media("rtsp://VCAM:PORT/cam{index:02d}", 1, "720p")
+            record = session.trial(1, capacity.parse_profile("evt"))
+        self.assertFalse(record["pass"])
+        self.assertNotIn("error", record)
+        self.assertIn("largest gap 0.966667s", record["reasons"][-1])
+
+    def test_webrtc_trial_fails_when_delivery_drops_frames_even_if_inference_keeps_up(self):
+        self.finish_webrtc_probe.return_value = {"delivered_fps": 17.7, "max_gap_seconds": 0.2, "pass": False}
+        session = self.session()
+        session.create_media("rtsp://VCAM:PORT/cam{index:02d}", 1, "720p")
+        record = session.trial(1, capacity.parse_profile("webrtc"))
+        self.assertGreaterEqual(record["min_fps"], capacity.PASS_FPS)
+        self.assertFalse(record["pass"])
+        self.assertEqual(record["webrtc_delivery"]["delivered_fps"], 17.7)
+        self.assertIn("got 17.7 FPS", record["reasons"][-1])
+        self.start_webrtc_probe.assert_called_once()
+        self.assertEqual(self.station.pipelines, {})
 
     def test_fast_camera_arrival_cannot_hide_slow_inference(self):
         self.station.perf = 10.0
@@ -633,10 +664,37 @@ class CapacitySessionTests(unittest.TestCase):
         self.assertFalse(self.station.records)
 
 
+def packets(count, *, skip=(), fps=30):
+    """ffprobe packet entries for `count` frames at `fps`, keyframe every second, minus the `skip` indices."""
+    return [{"pts_time": f"{index / fps:.6f}", "flags": "K__" if index % fps == 0 else "___"}
+            for index in range(count) if index not in skip]
+
+
 class SmartVideoProbeTests(unittest.TestCase):
+    def test_packet_continuity_reports_the_issue_964_gap_and_a_non_keyframe_start(self):
+        whole = capacity.packet_continuity(packets(270))
+        self.assertTrue(whole["first_packet_keyframe"])
+        self.assertAlmostEqual(whole["max_gap_seconds"], 1 / 30, places=5)
+        self.assertTrue(capacity.gap_ok(whole["max_gap_seconds"]))
+        skipped = capacity.packet_continuity(packets(270, skip=range(2, 30)))
+        self.assertFalse(capacity.gap_ok(skipped["max_gap_seconds"]))
+        self.assertTrue(capacity.gap_ok(capacity.packet_continuity(packets(270, skip=(5, 6)))["max_gap_seconds"]))
+        self.assertFalse(capacity.packet_continuity(packets(270)[1:])["first_packet_keyframe"])
+        with self.assertRaises(capacity.CapacityError):
+            capacity.packet_continuity([{"pts_time": "N/A"}])
+
+    def test_webrtc_probe_measures_delivered_cadence(self):
+        for frames, skip, passes in ((601, (), True), (601, range(1, 600, 2), False)):
+            with self.subTest(skip=skip):
+                process = mock.Mock(returncode=0)
+                process.communicate.return_value = (json.dumps({"packets": packets(frames, skip=skip)}), "")
+                result = capacity.finish_webrtc_probe(process)
+                self.assertEqual(result["pass"], passes)
+        self.assertAlmostEqual(result["delivered_fps"], 15.0, places=1)
+
     def test_probe_requires_decodable_full_length_video_with_requested_dimensions(self):
         good = {"streams": [{"codec_type": "video", "width": 1280, "height": 720, "nb_read_frames": "270",
-                             "codec_name": "h264"}], "format": {"duration": "9"}}
+                             "codec_name": "h264"}], "format": {"duration": "9"}, "packets": packets(270)}
         variants = [(good, "", True), ({**good, "format": {"duration": "2"}}, "", False),
                     ({**good, "streams": []}, "", False), (good, "corrupt frame", False),
                     ({**good, "streams": [{**good["streams"][0], "width": 640}]}, "", False)]
@@ -648,6 +706,7 @@ class SmartVideoProbeTests(unittest.TestCase):
                                                       {"record_uuid": "clip"}, capacity.Config(eventrec=True), "ffprobe")
                     self.assertEqual(probe["decoded_frames"], 270)
                     self.assertTrue(probe["fps_pass"])
+                    self.assertTrue(probe["continuity_pass"])
                     self.assertIn("-count_frames", run.call_args.args[0])
                 else:
                     with self.assertRaises(capacity.CapacityError):
@@ -656,7 +715,7 @@ class SmartVideoProbeTests(unittest.TestCase):
 
     def test_probe_keeps_decodable_low_fps_clip_as_measurement(self):
         data = {"streams": [{"codec_type": "video", "width": 1280, "height": 720, "nb_read_frames": "245",
-                             "codec_name": "h264"}], "format": {"duration": "9"}}
+                             "codec_name": "h264"}], "format": {"duration": "9"}, "packets": packets(245)}
         with mock.patch.object(capacity.subprocess, "run") as run:
             run.return_value = mock.Mock(returncode=0, stderr="", stdout=json.dumps(data))
             probe = capacity.probe_smart_clip(capacity.Api("http://MS3:8000"),

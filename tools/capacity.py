@@ -52,7 +52,14 @@ SMART_PRE_MS = 3000
 SMART_POST_MS = 6000
 SMART_MAX_MS = 10000
 SMART_TRIGGER_SECONDS = 30
-PROTOCOL = "webrtc-smart-video-v1"
+PROTOCOL = "webrtc-smart-video-v2"
+# Output-quality limits (v2): delivered frames must keep the 29 FPS bar and no gap may exceed three frame intervals,
+# so an output that drops frames to protect inference cannot pass on inference FPS alone.
+MAX_FRAME_GAP_SECONDS = 3 / TARGET_FPS
+GAP_TOLERANCE_SECONDS = 0.005
+WEBRTC_PROBE_SECONDS = 20
+# Read from inside the MS3 container, the same MediaMTX path that WebRTC viewers are served from.
+WEBRTC_READ_URL = "rtsp://host.docker.internal:8554/{uuid}_{slot}"
 DEFAULT_TILER = (1280, 720)
 NAME_PREFIX = "cap-"
 # ms3 MTX_SLOT_ROLES: slot 1 records, slot 2 serves WebRTC, slot 3 is RTMP. The signaling service starts slot 1
@@ -298,7 +305,8 @@ def settled(trial, count, *, margin=BORDERLINE_FPS):
     if not (0 < first["min_fps"] and abs(first["min_fps"] - PASS_FPS) < margin):
         return first
     again = trial(count)
-    combined = {key: first[key] for key in ("kind", "model", "profile", "run", "aip", "model_verified", "fps_metric")
+    combined = {key: first[key] for key in ("kind", "model", "profile", "run", "aip", "model_verified", "fps_metric",
+                                             "device", "protocol")
                 if key in first}
     combined.update({"n": count, "pass": first["pass"] and again["pass"],
                      "min_fps": min(first["min_fps"], again["min_fps"]),
@@ -602,8 +610,9 @@ def probe_smart_clip(ms3, record, config, ffprobe):
     """Decode/count frames after the measurement window, without retaining scene footage."""
     url = f"{ms3.base}/pipeline/record/{urllib.parse.quote(record['record_uuid'], safe='')}"
     try:
-        result = subprocess.run([ffprobe, "-v", "error", "-count_frames", "-show_streams", "-show_format",
-                                 "-of", "json", url], capture_output=True, text=True, timeout=60)
+        result = subprocess.run([ffprobe, "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_streams",
+                                 "-show_format", "-show_entries", "packet=pts_time,flags", "-of", "json", url],
+                                capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError) as error:
         raise CapacityError(f"Smart Video clip probe failed: {error}") from error
     if result.returncode or result.stderr.strip():
@@ -624,9 +633,61 @@ def probe_smart_clip(ms3, record, config, ffprobe):
         raise CapacityError(f"Smart Video clip dimensions {(width, height)} do not match {config.tiler}")
     if stream.get("codec_name") != "h264":
         raise CapacityError(f"Smart Video clip must contain H.264; got {stream.get('codec_name')}")
+    continuity = packet_continuity(data.get("packets"))
     return {"record_uuid": record["record_uuid"], "duration_seconds": duration, "decoded_frames": frames,
             "decoded_fps": frames / duration, "fps_pass": frames / duration >= PASS_FPS,
-            "width": width, "height": height, "codec": stream["codec_name"]}
+            "width": width, "height": height, "codec": stream["codec_name"], **continuity,
+            "continuity_pass": continuity["first_packet_keyframe"] and gap_ok(continuity["max_gap_seconds"])}
+
+
+def packet_continuity(packets):
+    """Timing of the video packets ffprobe listed: the largest PTS gap and whether the first one is a keyframe."""
+    try:
+        timed = [(float(packet["pts_time"]), "K" in packet.get("flags", "")) for packet in packets or []
+                 if packet.get("pts_time") not in (None, "N/A")]
+    except (TypeError, ValueError, KeyError) as error:
+        raise CapacityError("ffprobe returned unreadable packet timestamps") from error
+    if len(timed) < 2:
+        raise CapacityError(f"need at least two timed video packets, got {len(timed)}")
+    first_keyframe = timed[0][1]
+    stamps = sorted(stamp for stamp, _ in timed)
+    gaps = [later - earlier for earlier, later in zip(stamps, stamps[1:])]
+    return {"packets": len(stamps), "span_seconds": round(stamps[-1] - stamps[0], 6),
+            "max_gap_seconds": round(max(gaps), 6), "first_packet_keyframe": first_keyframe,
+            "keyframes": sum(key for _, key in timed)}
+
+
+def gap_ok(gap):
+    return gap <= MAX_FRAME_GAP_SECONDS + GAP_TOLERANCE_SECONDS
+
+
+def start_webrtc_probe(ffprobe, uuid_, *, seconds=WEBRTC_PROBE_SECONDS, url=WEBRTC_READ_URL):
+    """Start reading the WebRTC slot like a viewer does; collect it with finish_webrtc_probe."""
+    source = url.format(uuid=uuid_, slot=WEBRTC_SLOT)
+    try:
+        return subprocess.Popen([ffprobe, "-v", "error", "-rtsp_transport", "tcp", "-read_intervals", f"%+{seconds:g}",
+                                 "-select_streams", "v:0", "-show_entries", "packet=pts_time,flags", "-of", "json",
+                                 source], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except OSError as error:
+        raise CapacityError(f"WebRTC delivery probe could not start: {error}") from error
+
+
+def finish_webrtc_probe(process, *, timeout=WEBRTC_PROBE_SECONDS + 60):
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        process.kill()
+        process.communicate()
+        raise CapacityError("WebRTC delivery probe did not finish") from error
+    if process.returncode:
+        raise CapacityError(f"WebRTC delivery probe failed: {stderr.strip()[:300]}")
+    try:
+        continuity = packet_continuity(json.loads(stdout).get("packets"))
+    except ValueError as error:
+        raise CapacityError("WebRTC delivery probe returned invalid JSON") from error
+    fps = (continuity["packets"] - 1) / continuity["span_seconds"] if continuity["span_seconds"] > 0 else 0.0
+    return {**continuity, "delivered_fps": round(fps, 2),
+            "pass": fps >= PASS_FPS and gap_ok(continuity["max_gap_seconds"])}
 
 
 def verify_smart_recordings(ms3, uuid_, config, triggers, ffprobe, *, deadline=60):
@@ -744,7 +805,7 @@ class Session:
 
     def __init__(self, ms3, aip, model, ledger, *, signaling=None, verified=True, run=None, warmup=WARMUP_SECONDS,
                  window=WINDOW_SECONDS, interval=SAMPLE_SECONDS, containers=CONTAINERS, tegrastats=None,
-                 log=print, device="unspecified", ffprobe="ffprobe"):
+                 log=print, device="unspecified", ffprobe="ffprobe", live_ffprobe=None):
         self.ms3, self.signaling, self.aip, self.model, self.ledger = ms3, signaling, aip, model, ledger
         self.verified = verified
         self.run = run or new_run_id()
@@ -753,6 +814,7 @@ class Session:
         self.media = []
         self.trials = 0
         self.device, self.ffprobe = device, ffprobe
+        self.live_ffprobe = live_ffprobe or ffprobe
 
     def provenance(self):
         return {"run": self.run, "aip": aip_identity(self.aip), "model_verified": self.verified,
@@ -823,7 +885,7 @@ class Session:
                   "smart_video": ({"pre_duration_ms": SMART_PRE_MS, "post_duration_ms": SMART_POST_MS,
                                    "max_duration_ms": SMART_MAX_MS, "trigger_interval_seconds": SMART_TRIGGER_SECONDS,
                                    "triggers": [], "clips": []} if config.eventrec else None)}
-        uuid_ = None
+        uuid_ = webrtc_probe = None
         try:
             if not 1 <= count <= len(self.media):
                 raise CapacityError(f"{count} cameras asked for but this run registered {len(self.media)}")
@@ -837,6 +899,7 @@ class Session:
             time.sleep(self.warmup)
             samples = record["samples"]
             triggers = record["smart_video"]["triggers"] if config.eventrec else None
+            webrtc_probe = start_webrtc_probe(self.live_ffprobe, uuid_) if config.webrtc else None
             begin, end = self.sample(uuid_, config, samples, triggers)
             record["sample_start_unix"], record["sample_end_unix"] = begin, end
             record["containers_cpu_percent"] = container_cpu(self.containers)
@@ -846,6 +909,13 @@ class Session:
             record["pipeline_fps_mean"] = round(statistics.fmean(sample["pipeline_fps"] for sample in samples), 2)
             if self.tegrastats is not None:
                 record["tegrastats"] = self.tegrastats.between(begin, end)
+            if webrtc_probe is not None:
+                delivery = record["webrtc_delivery"] = finish_webrtc_probe(webrtc_probe)
+                if not delivery["pass"]:
+                    record["pass"] = False
+                    record["reasons"].append(
+                        f"WebRTC must deliver {PASS_FPS:g}+ FPS with no gap over {MAX_FRAME_GAP_SECONDS:.2f}s; got "
+                        f"{delivery['delivered_fps']:g} FPS, largest gap {delivery['max_gap_seconds']:g}s")
             if config.eventrec:
                 record["smart_video"]["clips"] = verify_smart_recordings(
                     self.ms3, uuid_, config, triggers, self.ffprobe)
@@ -855,11 +925,20 @@ class Session:
                         record["reasons"].append(
                             f"Smart Video clip must contain H.264 at {PASS_FPS:g}+ decoded FPS; "
                             f"got {clip['codec']} at {clip['decoded_fps']:g} FPS")
+                    if not clip.get("continuity_pass", True):
+                        record["pass"] = False
+                        record["reasons"].append(
+                            f"Smart Video clip must start on a keyframe with no gap over {MAX_FRAME_GAP_SECONDS:.2f}s; "
+                            f"got largest gap {clip['max_gap_seconds']:g}s, "
+                            f"first packet keyframe={clip['first_packet_keyframe']}")
         except CapacityError as error:
             record.update(evaluate(record["samples"], count))
             record.update({"pass": False, "error": str(error)})
             record["reasons"].append(f"trial failed: {error}")
         finally:
+            if webrtc_probe is not None and webrtc_probe.poll() is None:
+                webrtc_probe.kill()
+                webrtc_probe.communicate()
             if uuid_:
                 cleanup_errors = teardown(self.ms3, self.signaling, uuid_, config)
                 if cleanup_errors:
@@ -1220,6 +1299,9 @@ def open_session(args, config, cameras, *, exact):
         raise CapacityError("--first must be within the camera search range")
     if config.eventrec and shutil.which(args.ffprobe) is None:
         raise CapacityError("Smart Video trials require ffprobe to decode and verify the resulting clips")
+    live_ffprobe = args.live_ffprobe or args.ffprobe
+    if config.webrtc and shutil.which(live_ffprobe) is None:
+        raise CapacityError("WebRTC trials require ffprobe to read the delivered stream")
     ms3 = Api(args.ms3)
     preflight(ms3, config)
     aip = find_aip(ms3, args.aip)
@@ -1244,6 +1326,7 @@ def open_session(args, config, cameras, *, exact):
         pass
     with Tegrastats() as tegrastats:
         session = Session(ms3, aip, args.model, ledger, verified=verified, device=args.device, ffprobe=args.ffprobe,
+                          live_ffprobe=live_ffprobe,
                           warmup=args.warmup, window=args.window, interval=args.interval,
                           containers=tuple(name for name in args.containers.split(",") if name),
                           tegrastats=tegrastats)
@@ -1321,6 +1404,8 @@ def parser():
         sub.add_argument("--ms3", required=True, help="video-streaming API base URL, e.g. http://MS3:8000")
         sub.add_argument("--device", required=True, help="public hardware/power-mode label, e.g. ex3-orin-nano-8gb-15w")
         sub.add_argument("--ffprobe", default="ffprobe", help="ffprobe executable for Smart Video clip validation")
+        sub.add_argument("--live-ffprobe", help="ffprobe that can reach MediaMTX inside MS3 to read the WebRTC "
+                         "slot (default: --ffprobe)")
         sub.add_argument("--model", required=True, choices=MODELS)
         sub.add_argument("--aip", required=True, help="unique ID of the AIP built for this model")
         sub.add_argument("--unverified-model", action="store_true",

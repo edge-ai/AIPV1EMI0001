@@ -145,6 +145,31 @@ class PublishedContentTests(unittest.TestCase):
         self.assertEqual({row["model"] for row in records if row["kind"] in {"trial", "fixed"}},
                          set(self.by_id))
 
+    def test_ex3_six_camera_report_counts_attempts_not_search_summaries(self):
+        report = (EX3_RESULTS / "capacity.md").read_text()
+        all_attempts = []
+        for name in ("capacity-fixed-ms3.jsonl", "capacity-fixed-ms3-recheck.jsonl",
+                     "capacity-fixed-ms3-boundary.jsonl"):
+            attempts = []
+            for row in capacity.load(EX3_RESULTS / name):
+                if row["kind"] not in ("trial", "fixed") or (row["model"], row["profile"]) != ("yolo26", "base"):
+                    continue
+                trial = row.get("trial", row)
+                if trial["n"] != 6:
+                    continue
+                capacity.require_valid_trial(trial)
+                attempts.extend(trial.get("attempts", [trial]))
+            self.assertTrue(attempts, name)
+            for attempt in attempts:
+                self.assertEqual(len(attempt["per_input_fps"]), 6)
+                self.assertEqual(min(attempt["per_input_fps"].values()), attempt["min_fps"])
+                self.assertEqual(attempt["pass"], attempt["min_fps"] >= capacity.PASS_FPS)
+            results = ", ".join(f"{a['min_fps']:.2f} {'pass' if a['pass'] else 'fail'}" for a in attempts)
+            self.assertIn(f"]({name}) | {results} | {sum(a['pass'] for a in attempts)}/{len(attempts)} |", report)
+            all_attempts.extend(attempts)
+        self.assertEqual(len({a["started"] for a in all_attempts}), len(all_attempts))
+        self.assertIn(f"{sum(a['pass'] for a in all_attempts)} of {len(all_attempts)} attempts passed", report)
+
     def test_the_recorded_summary_is_visible_without_running_the_comparison(self):
         self.assertIn(compare_models.summary_table(self.entries), markdown("04-compare-models.ipynb"))
 

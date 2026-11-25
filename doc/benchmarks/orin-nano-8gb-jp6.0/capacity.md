@@ -1,12 +1,13 @@
 # Camera capacity on EX3
 
-These are 720p30 H.264 RTSP results from an **EX3 / Orin Nano 8 GB** in
-15 W mode, measured on 24 November 2026. The station ran L4T R36.3.0 and
-`ms3-36.3.0-v0.31.0`; test AIPs were version 7.0.0. The comparison uses the
-same near-real-time rule for every model: every camera must sustain at least
-29 processed FPS over a 120-second sample after a 45-second warm-up.
+With no video output, the **EX3 / Orin Nano 8 GB** supported **5 cameras for
+YOLO26n, 5 for YOLOv10n and 3 for YOLOv7-tiny**. The [patched-stack
+results](#patched-stack-results) explain why six is not a reliable YOLO26n
+limit. All trials used 720p30 H.264 RTSP inputs, 15 W mode, L4T R36.3.0
+and version 7.0.0 test AIPs. For a capacity trial to pass, every camera must
+average at least 29 processed FPS over 120 seconds after a 45-second warm-up.
 
-## Results
+## Released-stack results (24 November 2026)
 
 OSD is enabled for output profiles. WebRTC was measured with the publisher
 running and **no connected viewer**. Smart Video is the UI-configured event
@@ -46,7 +47,61 @@ FPS; its two-camera trial failed the clip check and its four- and five-camera
 rechecks failed processed FPS. Treat these as contested outcomes, not as proof
 that combined output is impossible.
 
-## Boundary measurements
+## Patched-stack results
+
+Two campaigns on 25 November repeated the comparison on the same EX3 with
+two changes to `ms3-36.3.0-v0.31.0`: slow outputs could drop frames instead
+of blocking inference, and Smart Video started each clip on a keyframe
+without discarding the following frames. These are not stock-image results.
+
+The no-output pass rule was unchanged. Protocol `webrtc-smart-video-v2`
+also checked the **delivered video**: at least 29 FPS from the WebRTC
+publisher's MediaMTX stream, at least 29 decoded FPS for each Smart Video
+clip, and no packet gap over 0.10 s (plus 5 ms timing tolerance) in either.
+Clips also had to start on a keyframe.
+
+| Model | No output | WebRTC | Smart Video | WebRTC + Smart Video |
+|---|---:|---|---|---|
+| YOLO26n | **5†** | Fails at 1 camera | Fails at 1 camera | Fails at 1 camera |
+| YOLOv10n | **5** | Fails at 1 camera | Fails at 1 camera | Fails at 1 camera |
+| YOLOv7-tiny | **3** | Fails at 1 camera | Fails at 1 camera | Fails at 1 camera |
+
+With outputs enabled, inference stayed near 30 FPS per camera, but the video
+did not keep up. Across the two campaigns, the MediaMTX stream delivered
+21.29–27.10 FPS with packet gaps up to 0.20 s. The 72 Smart Video clips
+decoded at 22.92–29.78 FPS. All started on a keyframe; the largest gap was
+0.167 s, not the roughly one-second gap seen before the recording fix.
+The MediaMTX RTSP measurement is **not browser playback**. No browser viewer
+was connected and lower output resolutions, frame rates and bitrates were
+not tested.
+
+### Why YOLO26n is rated for five cameras, not six
+
+At five cameras, the slowest camera averaged **30.18** and **30.15 FPS** in
+the two fixed-stack campaigns. At six, only **3 of 7 attempts passed**.
+Each value below is the lowest of the six per-camera means over its own
+120-second window, not an instantaneous minimum or a pipeline average.
+
+| Six-camera attempts, in run order | Slowest camera (processed FPS) | Passed |
+|---|---|---:|
+| [First campaign](capacity-fixed-ms3.jsonl) | 28.81 fail, 28.22 fail | 0/2 |
+| [Second campaign](capacity-fixed-ms3-recheck.jsonl) | 29.24 pass, 27.85 fail | 1/2 |
+| [Boundary-only repeat](capacity-fixed-ms3-boundary.jsonl) | 29.17 pass, 28.77 fail, 29.28 pass | 2/3 |
+
+The last three runs used fresh pipelines on 25–26 November (JST), with OSD
+and all outputs off. Each yielded 24 samples with all six inputs streaming
+and no reconnects or inference stalls. In the failed repeat, **all six**
+camera means were below 29 FPS (28.77–28.94). Six can pass, but not
+repeatably under the same conditions; **five is the qualified limit**.
+No other model, camera count or output profile was rerun in this check.
+
+The first two JSONL files contain 44 records each. Both six-camera attempts
+from each campaign are in the search trial's `attempts` array; the
+`capacity` record summarizes the same search and is not another trial.
+The boundary-only file contains three independent `fixed` records with
+per-camera means, timestamps, verdicts and aggregate telemetry.
+
+## Released-stack boundary measurements
 
 The table gives the slowest-camera processed FPS for independent checks at the
 last supported count and the next count. Smart Video rows also require every

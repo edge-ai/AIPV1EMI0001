@@ -10,7 +10,8 @@ as measurements of this matrix.
 ## Results and gaps
 
 Camera counts below are per pipeline for 720p30 H.264 RTSP inputs. OSD is on
-in the output columns. A dash means **not measured**, never zero capacity.
+in the output columns. The EX3 rows are the **released v0.31.0 baseline** (24 November),
+not the patched-stack results. A dash means **not measured**, never zero capacity.
 
 | Device | Model | No output | WebRTC | Smart Video | WebRTC + Smart Video |
 |---|---|---:|---:|---:|---:|
@@ -31,6 +32,11 @@ clip failure; YOLOv10n Smart Video had an earlier one-camera clip failure;
 YOLOv7-tiny combined output passed a two-camera recheck after search failures.
 The conservative counts and unstable combined-profile outcomes are explained
 in the EX3 report. EX5 output profiles remain unmeasured under this protocol.
+
+On the [patched EX3 stack](../orin-nano-8gb-jp6.0/capacity.md#patched-stack-results),
+the no-output limits are **5 / 5 / 3** in the same model order. YOLO26n can
+occasionally pass at six, but not reliably. Inference stayed near 30 FPS in the
+output tests; none of the three output profiles met the v2 delivery checks at one camera.
 
 ### Station checks and EX3 results
 
@@ -70,13 +76,21 @@ Output mosaic: 1280x720. WebRTC: 2 Mbps. Smart Video: 4 Mbps. The recorded
 settings, trigger acknowledgments, decoded clip frame counts, dimensions and
 durations accompany each trial. After the sample window, `ffprobe -count_frames`
 must decode each H.264 clip without errors at at least 29 decoded FPS; total duration must be 9 seconds within
-a 2-second keyframe-alignment tolerance. This does not prove the exact split
+a 2-second keyframe-alignment tolerance. Since protocol `webrtc-smart-video-v2`, the clip must also start on a
+keyframe and the maximum packet gap is 0.10 s (three frame intervals, plus 5 ms timing tolerance), so a clip
+that skips a GOP after its first keyframe fails even when its average frame rate passes. This does not prove the exact split
 of frames before and after a trigger; verify that with timestamped footage
 in the deployment pilot. Clip decoding runs after FPS sampling so it does
 not contaminate the measured window.
 
+Since `webrtc-smart-video-v2`, a WebRTC trial also reads the published stream
+back from MediaMTX (`rtsp://…:8554/{pipeline}_2`, `--live-ffprobe`) for the
+first 20 seconds of the sample window. It passes only if that stream delivers
+at least **29 FPS** with the same packet-gap limit. An MS3 that drops preview frames
+to protect inference therefore cannot pass on inference FPS alone.
+
 The automated WebRTC profile measures the encoder and publisher **without a
-connected viewer**. It must not be described as browser-playback performance.
+connected browser viewer**. It must not be described as browser-playback performance.
 For the deployment pilot, also negotiate WebRTC and confirm decoded frames in
 a browser. Record viewer count and use a separate result set for viewer load.
 
@@ -135,6 +149,8 @@ python3 tools/capacity.py cleanup --ms3 http://MS3:8000 \
 ```
 
 Smart Video trials require `ffprobe` (`--ffprobe` selects its executable).
+WebRTC trials need an ffprobe that can reach MediaMTX as MS3 does
+(`--live-ffprobe`, for example a wrapper around `docker exec ms3_videostreaming ffprobe`).
 They do not require a signaling URL. Legacy `rec`/`hls` profiles remain readable
 for historical summaries and ledger recovery, but new trials reject them.
 
