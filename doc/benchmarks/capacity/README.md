@@ -7,18 +7,16 @@ and both outputs together.
 ## Cameras per pipeline
 
 **No output** is comparable across devices: both tests required at least 29
-processed FPS on every camera over 120 seconds. **Video output** is not yet
-comparable. The [EX3 trials](../orin-nano-8gb-jp6.0/capacity.md) measured frames
-delivered by the publisher and decoded from saved clips. The [EX5 output
-trials](../orin-nx-16gb-jp6.0/capacity.md#output-screening) checked publisher
-operation and recording triggers, not whether the video met the same quality
-requirements.
+processed FPS on every camera over 120 seconds. The v2 video checks use the same
+publisher and clip-quality criteria on both devices. EX3 did not qualify its
+output profiles at one camera; EX5 passed each profile at one camera, but its
+multi-camera output limits are not measured.
 
 | Device | Model | No output | WebRTC | Smart Video | WebRTC + Smart Video |
 |---|---|---:|---:|---:|---:|
-| EX5, Orin NX 16 GB | YOLO26n | 7 (baseline) | Not measured | Not measured | Not measured |
-| EX5, Orin NX 16 GB | YOLOv10n | 6 (baseline) | Not measured | Not measured | Not measured |
-| EX5, Orin NX 16 GB | YOLOv7-tiny | 4 (baseline) | Not measured | Not measured | Not measured |
+| EX5, Orin NX 16 GB | YOLO26n | 7 (baseline) | At least 1 (screened) | At least 1 (screened) | At least 1 (screened) |
+| EX5, Orin NX 16 GB | YOLOv10n | 6 (baseline) | At least 1 (screened) | At least 1 (screened) | At least 1 (screened) |
+| EX5, Orin NX 16 GB | YOLOv7-tiny | 4 (baseline) | At least 1 (screened) | At least 1 (screened) | At least 1 (screened) |
 | EX3, Orin Nano 8 GB | YOLO26n | 5† | Not qualified at 1 | Not qualified at 1 | Not qualified at 1 |
 | EX3, Orin Nano 8 GB | YOLOv10n | 5 | Not qualified at 1 | Not qualified at 1 | Not qualified at 1 |
 | EX3, Orin Nano 8 GB | YOLOv7-tiny | 3 | Not qualified at 1 | Not qualified at 1 | Not qualified at 1 |
@@ -27,8 +25,10 @@ requirements.
 
 **Not qualified at 1** means detection kept up with one camera but the video
 did not. For example, with Smart Video alone, [22 of 24 clips](../orin-nano-8gb-jp6.0/capacity.md#what-the-recording-failures-mean)
-fell below 29 decoded FPS. **Not measured** means there is no EX5 result for
-that output under protocol v2. The [earlier EX3 measurements](../orin-nano-8gb-jp6.0/capacity.md#earlier-measurements-protocol-v1)
+fell below 29 decoded FPS. **At least 1 (screened)** means one camera passed
+processing and video-quality checks; it is not the maximum camera count. The
+[EX5 output results](../orin-nx-16gb-jp6.0/capacity.md#protocol-v2-one-camera-output-checks)
+are one-camera checks only. The [earlier EX3 measurements](../orin-nano-8gb-jp6.0/capacity.md#earlier-measurements-protocol-v1)
 used different output checks and are not included in the table.
 
 ## What each trial does

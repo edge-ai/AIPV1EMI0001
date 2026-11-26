@@ -26,8 +26,8 @@ NOTEBOOKS = ROOT / "notebooks"
 BUILD = {"yolov7": "01-build-yolov7.ipynb", "yolov10": "02-build-yolov10.ipynb", "yolo26": "03-build-yolo26.ipynb"}
 BASELINE_COLUMNS = [("720p", "base"), ("1080p", "base")]
 WEBRTC_SCREENING = [name for name in capacity.SCREENING if not capacity.parse_profile(name).eventrec]
-PATCHED_EX3_FILES = ("capacity-fixed-ms3.jsonl", "capacity-fixed-ms3-recheck.jsonl",
-                     "capacity-fixed-ms3-boundary.jsonl")
+V2_EX3_FILES = ("capacity-protocol-v2.jsonl", "capacity-protocol-v2-recheck.jsonl",
+                "capacity-boundary-v2.jsonl")
 
 
 def notebook(name):
@@ -107,13 +107,14 @@ class PublishedContentTests(unittest.TestCase):
         baseline = table_rows(capacity.camera_table(capacity.load(RESULTS / "capacity.jsonl"),
                                                     columns=[("720p", "base")]))
         counts = {row[0]: row[1].rstrip("†") for row in baseline}
-        patched = [row for name in PATCHED_EX3_FILES for row in capacity.load(EX3_RESULTS / name)]
+        v2_records = [row for name in V2_EX3_FILES for row in capacity.load(EX3_RESULTS / name)]
         ex3_counts = {row[0]: row[1:] for row in table_rows(capacity.camera_table(
-            patched, columns=[("720p", profile) for profile in ("base", *capacity.CAPACITY_PROFILES)]))}
+            v2_records, columns=[("720p", profile) for profile in ("base", *capacity.CAPACITY_PROFILES)]))}
         self.assertEqual(len(table_rows("| Device |" + table)), 2 * len(self.by_id))
         for line in table_rows("| Device |" + table):
             device, model, *cells = line
-            expected = ([f"{counts[model]} (baseline)", "Not measured", "Not measured", "Not measured"]
+            expected = ([f"{counts[model]} (baseline)", "At least 1 (screened)",
+                         "At least 1 (screened)", "At least 1 (screened)"]
                         if device.startswith("EX5") else ex3_counts[model])
             self.assertEqual(cells, expected)
         for text in (readme, comparison):
@@ -125,6 +126,7 @@ class PublishedContentTests(unittest.TestCase):
     def test_retained_benchmark_evidence_contains_only_supported_profiles(self):
         def check_profiles(value):
             if isinstance(value, dict):
+                self.assertNotIn("ms3_build", value)
                 if "profile" in value:
                     capacity.validate_live_profile(capacity.parse_profile(value["profile"]))
                 for item in value.values():
@@ -138,9 +140,58 @@ class PublishedContentTests(unittest.TestCase):
                 with self.subTest(file=path):
                     values = capacity.load(path) if path.suffix == ".jsonl" else json.loads(path.read_text())
                     check_profiles(values)
+        for name in V2_EX3_FILES:
+            evidence = (EX3_RESULTS / name).read_text().lower()
+            with self.subTest(file=name):
+                self.assertNotIn('"hls"', evidence)
+                self.assertNotIn("ms3_build", evidence)
+
+    def test_ex5_protocol_v2_output_screening_matches_published_results(self):
+        records = capacity.load(RESULTS / "capacity-output-v2.jsonl")
+        expected = {(model, profile) for model in self.by_id
+                    for profile in capacity.CAPACITY_PROFILES}
+        self.assertEqual({(row["model"], row["profile"]) for row in records}, expected)
+        self.assertEqual(len(records), 9)
+
+        report = (RESULTS / "capacity.md").read_text()
+        table = report.split("## Protocol v2: one-camera output checks", 1)[1].split("\n## ", 1)[0]
+        for row in records:
+            with self.subTest(model=row["model"], profile=row["profile"]):
+                self.assertEqual(row["kind"], "fixed")
+                self.assertEqual(row["n"], 1)
+                self.assertTrue(row["pass"])
+                self.assertGreaterEqual(row["min_fps"], capacity.PASS_FPS)
+                self.assertEqual(row["protocol"], capacity.PROTOCOL)
+                self.assertEqual(row["stage"], "single-camera-screening")
+
+                if "webrtc" in row["profile"]:
+                    delivery = row["webrtc_delivery"]
+                    self.assertTrue(delivery["pass"])
+                    self.assertGreaterEqual(delivery["delivered_fps"], capacity.PASS_FPS)
+                    self.assertLessEqual(delivery["max_gap_seconds"], capacity.MAX_FRAME_GAP_SECONDS)
+                if "evt" in row["profile"]:
+                    clips = row["smart_video"]["clips"]
+                    self.assertEqual(len(clips), 4)
+                    for clip in clips:
+                        self.assertEqual(clip["codec"], "h264")
+                        self.assertTrue(clip["fps_pass"])
+                        self.assertTrue(clip["continuity_pass"])
+                        self.assertTrue(clip["first_packet_keyframe"])
+                        self.assertGreaterEqual(clip["decoded_fps"], capacity.PASS_FPS)
+                        self.assertLessEqual(clip["max_gap_seconds"], capacity.MAX_FRAME_GAP_SECONDS)
+
+                label = {"webrtc-osd": "WebRTC", "evt-osd": "Smart Video",
+                         "webrtc+evt-osd": "WebRTC + Smart Video"}[row["profile"]]
+                self.assertIn(f"| {capacity.MODEL_NAMES[row['model']]} | {label} | "
+                              f"{row['min_fps']:.2f} |", table)
+
+        evidence = (RESULTS / "capacity-output-v2.jsonl").read_text().lower()
+        for field in ("hls", "ms3_build", "pipeline", "run", "aip", "record_uuid", "camera_tag"):
+            with self.subTest(field=field):
+                self.assertNotIn(f'"{field}"', evidence)
 
     def test_recording_deficit_table_uses_saved_one_camera_clips(self):
-        records = [row for name in PATCHED_EX3_FILES[:2] for row in capacity.load(EX3_RESULTS / name)]
+        records = [row for name in V2_EX3_FILES[:2] for row in capacity.load(EX3_RESULTS / name)]
         report = (EX3_RESULTS / "capacity.md").read_text()
         all_clips = []
         for model in self.by_id:
@@ -186,8 +237,7 @@ class PublishedContentTests(unittest.TestCase):
     def test_ex3_six_camera_report_counts_attempts_not_search_summaries(self):
         report = (EX3_RESULTS / "capacity.md").read_text()
         all_attempts = []
-        for name in ("capacity-fixed-ms3.jsonl", "capacity-fixed-ms3-recheck.jsonl",
-                     "capacity-fixed-ms3-boundary.jsonl"):
+        for name in V2_EX3_FILES:
             attempts = []
             for row in capacity.load(EX3_RESULTS / name):
                 if row["kind"] not in ("trial", "fixed") or (row["model"], row["profile"]) != ("yolo26", "base"):
@@ -320,8 +370,10 @@ class ComparisonNotebookTests(unittest.TestCase):
                        for attempt in (trial.get("attempts") or [trial]) if attempt.get("started")}
         checks = json.loads((RESULTS / "capacity-outputs.json").read_text())["checks"]
         outputs = {day(check["probe"]["t"]) for check in checks}
+        output_v2 = {day(row["started"]) for row in capacity.load(RESULTS / "capacity-output-v2.jsonl")}
         for text in (f"| Accuracy | {span(accuracy)} |", f"| Inference time | {span(latency)} |",
                      f"| Camera capacity (EX5) | {span(cameras)} | {len(trials)} live RTSP trials",
+                     f"| Output checks (EX5) | {span(output_v2)} | Nine one-camera model/profile checks under protocol v2",
                      f"| Camera capacity (EX3) | {span(ex3_cameras)} | 720p, WebRTC and Smart Video tests",
                      f"| Output checks | {span(outputs)} | {len(checks)} YOLO26n WebRTC-only output diagnostics |"):
             with self.subTest(text=text):

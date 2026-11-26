@@ -46,7 +46,7 @@ eight clips per model. Detection and saved-video rate differ:
 Rates in the table are rounded; pass/fail uses the full-precision values.
 For example, the YOLOv10n clip displayed as 29.00 is just above 29.
 Across the three models, **22 of 24 clips** were below target. In the
-[YOLO26n recheck](capacity-fixed-ms3-recheck.jsonl), detection ran at
+[YOLO26n recheck](capacity-protocol-v2-recheck.jsonl), detection ran at
 30.09 FPS while four 9.033333-second clips contained 253, 243, 247 and 256
 pictures (271 expected). Their packet counts equal the decoded-frame counts:
 pictures are missing in the files, not merely slow to decode. Every clip
@@ -65,9 +65,9 @@ Each value below is the lowest of the six per-camera means over its own
 
 | Six-camera attempts, in run order | Slowest camera (processed FPS) | Passed |
 |---|---|---:|
-| [First campaign](capacity-fixed-ms3.jsonl) | 28.81 fail, 28.22 fail | 0/2 |
-| [Second campaign](capacity-fixed-ms3-recheck.jsonl) | 29.24 pass, 27.85 fail | 1/2 |
-| [Boundary-only repeat](capacity-fixed-ms3-boundary.jsonl) | 29.17 pass, 28.77 fail, 29.28 pass | 2/3 |
+| [First campaign](capacity-protocol-v2.jsonl) | 28.81 fail, 28.22 fail | 0/2 |
+| [Second campaign](capacity-protocol-v2-recheck.jsonl) | 29.24 pass, 27.85 fail | 1/2 |
+| [Boundary-only repeat](capacity-boundary-v2.jsonl) | 29.17 pass, 28.77 fail, 29.28 pass | 2/3 |
 
 The last three runs used fresh pipelines on 25–26 November (JST), with OSD
 and all outputs off. Each yielded 24 samples with all six inputs streaming
@@ -148,6 +148,7 @@ mean FPS, CPU/GPU utilization, output settings, clip properties and failure
 reasons. The search was limited to the AIP's maximum of eight inputs.
 
 The [capacity matrix](../capacity/README.md) compares these results with EX5.
-EX5 output profiles have not been remeasured under this protocol, and EX3
-1080p inputs, connected WebRTC viewers, multiple simultaneous pipelines,
-long-duration thermal behavior and varied scenes remain untested.
+EX5 passed the protocol-v2 output checks at one camera; multi-camera output
+limits have not been established. EX3 1080p inputs, connected WebRTC viewers,
+multiple simultaneous pipelines, long-duration thermal behavior and varied
+scenes remain untested.
