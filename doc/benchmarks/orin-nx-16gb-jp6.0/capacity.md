@@ -2,7 +2,8 @@
 
 With video outputs off, one EX5 (Orin NX 16 GB) sustained **7 cameras with
 YOLO26n, 6 with YOLOv10n and 4 with YOLOv7-tiny** at both input resolutions.
-WebRTC and Smart Video have no qualified camera count under protocol v2.
+WebRTC and Smart Video were not measured with the delivery and clip checks used
+on EX3, so the output camera counts cannot yet be compared.
 
 ## Measured no-output limits
 
@@ -25,9 +26,10 @@ camera limit.
 
 ## Output screening
 
-WebRTC-only screening on YOLO26n at seven 720p cameras measured 30.45 FPS
-without OSD and 30.23 FPS with OSD. This tested the publisher **without a
-connected viewer**, not browser playback or a separate maximum search.
+With the WebRTC publisher enabled, YOLO26n processed seven 720p inputs. The
+slowest camera averaged 30.45 processed FPS without OSD and 30.23 with OSD.
+These are **input processing rates**, not the frame rate delivered by the
+publisher. No browser viewer was connected.
 
 The event-recording trials enabled the buffer and sent triggers but did not
 verify clip integrity or duration. They cannot establish a Smart Video camera
@@ -36,8 +38,8 @@ count under the [EX3/EX5 output checks](../capacity/README.md).
 ### WebRTC diagnostic evidence
 
 The diagnostics contain **16 WebRTC-only attempts: 5 successful and
-11 failed**. All eleven failures used one camera with OSD on the EX5
-development build. MediaMTX reported hardware-encoder errors, processed-FPS
+11 failed**. All eleven failures used one camera with OSD. MediaMTX reported
+hardware-encoder errors, processed-FPS
 metrics disappeared, and the pipeline stopped. These startup/encoder errors
 are not zero-camera throughput results.
 
@@ -49,8 +51,8 @@ The diagnostics did not establish the cause of the one-camera failures.
 ## Test conditions
 
 The no-output trials used Orin NX 16 GB, MAXN power mode, JetPack
-6.0 / L4T R36.3, DeepStream 7.0 and TensorRT 8.6.2.3. The streaming service
-was a development build. Engines were FP16-enabled, 640x640, with batch size
+6.0 / L4T R36.3, DeepStream 7.0 and TensorRT 8.6.2.3.
+Engines were FP16-enabled, 640x640, with batch size
 `min(cameras, 8)`; NvDCF tracking was on, ROI/LCC analytics off, and inference
 ran on every frame. TCP RTSP cameras looped staggered copies of one street
 clip. Node-RED and WebSocket metadata outputs remained on.

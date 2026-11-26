@@ -1,63 +1,18 @@
 # Camera capacity on EX3
 
 With no video output, the **EX3 / Orin Nano 8 GB** supported **5 cameras for
-YOLO26n, 5 for YOLOv10n and 3 for YOLOv7-tiny**. The [patched-stack
-results](#patched-stack-results) explain why six is not a reliable YOLO26n
-limit. All trials used 720p30 H.264 RTSP inputs, 15 W mode, L4T R36.3.0
+YOLO26n, 5 for YOLOv10n and 3 for YOLOv7-tiny**. With video output enabled,
+detection kept up at one camera, but the video did not meet the delivery or
+recording requirements. All trials used 720p30 H.264 RTSP inputs, 15 W mode, L4T R36.3.0
 and version 7.0.0 test AIPs. For a capacity trial to pass, every camera must
 average at least 29 processed FPS over 120 seconds after a 45-second warm-up.
 
-## Released-stack results (24 November 2026)
+## Camera capacity and video quality
 
-OSD is enabled for output profiles. WebRTC was measured with the publisher
-running and **no connected viewer**. Smart Video is the UI-configured event
-recording feature, with 3 seconds pre-roll, 6 seconds post-roll, a 10-second
-maximum buffer and one trigger every 30 seconds.
-
-| Model | No output | WebRTC | Smart Video | WebRTC + Smart Video |
-|---|---:|---|---:|---|
-| YOLO26n | **5** | Inference below target at 1 | **3†** | Unstable |
-| YOLOv10n | **5** | Inference below target at 1 | **4†** | Unstable |
-| YOLOv7-tiny | **3** | Inference below target at 1 | **3** | **1†** |
-
-No-output counts passed a separate boundary recheck; the next count failed.
-For Smart Video, YOLOv7-tiny passed at three and failed at four. YOLOv10n
-passed four and failed five because one recorded H.264 clip decoded at
-27.29 FPS, despite the inference rate exceeding 30 FPS. Its first one-camera
-pilot also failed clip validation, but a later confirmation passed; `†` marks
-that contradictory pilot evidence. YOLO26n passed three;
-an earlier four-camera search failed on a 27.29 FPS clip, while the independent
-four-camera boundary recheck passed with 30.14 minimum processed FPS and
-valid clips. `†` marks that conflicting four-camera evidence; three is the
-conservative count pending another repeat.
-
-WebRTC alone failed the 120-second, 29-FPS requirement even with one camera:
-the measured minimums were 27.58 FPS for YOLO26n, 27.72 for YOLOv10n and
-27.85 for YOLOv7-tiny. YOLOv7-tiny's shorter one-camera pilot passed, so it
-does not override the long-window failure.
-
-Combined WebRTC and Smart Video was not stable enough to publish as a maximum.
-YOLOv7-tiny passed one camera in the search; the repeated two-camera search
-failed, but a separate two-camera boundary recheck passed at 29.37 FPS with
-valid clips. YOLOv10n passed a one-camera pilot but failed a later one-camera
-clip check; its four- and five-camera boundary checks also failed. YOLO26n
-passed one short pilot, but the long-window one-camera test failed at 28.64
-FPS; its two-camera trial failed the clip check and its four- and five-camera
-rechecks fell below 29 processed FPS.
-
-## Patched-stack results
-
-Two runs on 25 November used the same EX3 with streaming service build
-`v0.31.0+output.5c2417a0+recording.c8c19098`. This build allows slow outputs
-to drop frames instead of blocking inference and changes how Smart Video
-starts a clip on a keyframe.
-
-The no-output pass rule was unchanged. **Both v1 and v2 require at least
-29 decoded FPS for every Smart Video clip.** Protocol `webrtc-smart-video-v2`
-adds at least 29 delivered FPS from the WebRTC publisher's MediaMTX stream,
-keyframe starts for clips, and no packet gap over 0.10 s (plus 5 ms timing
-tolerance) for either output. A stock-v1 versus patched-v2 comparison changes
-both software and checks; it does not isolate the effect of the output patch.
+The 25 November trials used protocol v2. WebRTC must deliver at least 29 FPS
+at the publisher; every Smart Video clip must decode at 29 FPS or more and
+start on a keyframe. Neither output may have a packet gap over 100 ms (plus
+5 ms timing tolerance). Output trials enabled the on-screen display (OSD).
 
 | Model | No output | WebRTC | Smart Video | WebRTC + Smart Video |
 |---|---:|---|---|---|
@@ -72,14 +27,14 @@ With outputs enabled, inference stayed near 30 FPS per camera, but the video
 did not keep up. Across the two campaigns, the MediaMTX stream delivered
 21.29–27.10 FPS with packet gaps up to 0.20 s. The 72 Smart Video clips
 decoded at 22.92–29.78 FPS. All started on a keyframe; the largest gap was
-0.167 s, not the roughly one-second gap seen before the recording fix.
+0.167 s.
 The MediaMTX RTSP measurement is **not browser playback**. No browser viewer
 was connected and lower output resolutions, frame rates and bitrates were
 not tested.
 
 ### What the recording failures mean
 
-For Smart Video alone with one camera, the two patched campaigns contain
+For Smart Video alone with one camera, the two runs contain
 eight clips per model. Detection and saved-video rate differ:
 
 | Model | Processed FPS across runs | Decoded clip FPS | Clips below 29 FPS |
@@ -104,7 +59,7 @@ were lost.
 ### Why YOLO26n is rated for five cameras, not six
 
 At five cameras, the slowest camera averaged **30.18** and **30.15 FPS** in
-the two fixed-stack campaigns. At six, only **3 of 7 attempts passed**.
+the two runs. At six, only **3 of 7 attempts passed**.
 Each value below is the lowest of the six per-camera means over its own
 120-second window, not an instantaneous minimum or a pipeline average.
 
@@ -127,7 +82,27 @@ from each campaign are in the search trial's `attempts` array; the
 The boundary-only file contains three independent `fixed` records with
 per-camera means, timestamps, verdicts and aggregate telemetry.
 
-## Released-stack boundary measurements
+## Earlier measurements (protocol v1)
+
+On 24 November, each camera still had to average 29 processed FPS, and every
+Smart Video clip had to decode at 29 FPS or more. These trials did not check
+delivered WebRTC FPS, clip starts or packet gaps. Their output counts are
+therefore reported separately from the v2 results.
+
+| Model | No output | WebRTC | Smart Video | WebRTC + Smart Video |
+|---|---:|---|---:|---|
+| YOLO26n | **5** | Inference below target at 1 | **3†** | Unstable |
+| YOLOv10n | **5** | Inference below target at 1 | **4†** | Unstable |
+| YOLOv7-tiny | **3** | Inference below target at 1 | **3** | **1†** |
+
+† Repeat trials disagreed; the table uses the conservative count. With
+WebRTC alone, one-camera trials averaged 27.58 processed FPS for YOLO26n,
+27.72 for YOLOv10n and 27.85 for YOLOv7-tiny over the full 120 seconds.
+With both outputs, YOLO26n passed a short pilot but fell to 28.64 FPS in
+the full one-camera trial; YOLOv10n passed its pilot but later failed a
+one-camera clip check.
+
+### Boundary measurements
 
 The table gives the slowest-camera processed FPS for independent checks at the
 last supported count and the next count. Smart Video rows also require every
@@ -162,10 +137,12 @@ Each capacity trial used 45 seconds of warm-up and 120 seconds of sampling,
 with per-input processed-FPS checks every 5 seconds. A passing count requires
 every input to remain connected, no inference stalls or reconnects, and at
 least 29 processed FPS per camera. Smart Video clips were decoded and checked
-after sampling to avoid perturbing the FPS window. WebRTC used a 1280x720
+after sampling to avoid perturbing the FPS window. Smart Video requested 3
+seconds before and 6 seconds after each trigger, with a 10-second buffer
+and one trigger every 30 seconds. WebRTC used a 1280x720
 mosaic at 2 Mbps; Smart Video used 4 Mbps. No browser viewer was connected.
 
-The [released-stack dataset](capacity.jsonl) contains 81 pilot, search,
+The [24 November dataset](capacity.jsonl) contains 81 pilot, search,
 and boundary records, including failed attempts. Records include per-camera
 mean FPS, CPU/GPU utilization, output settings, clip properties and failure
 reasons. The search was limited to the AIP's maximum of eight inputs.

@@ -6,11 +6,13 @@ and both outputs together.
 
 ## Cameras per pipeline
 
-Counts require at least 29 processed FPS **on every camera**. With video output
-enabled, the output must also meet the delivery checks below. The EX5 counts
-come from the [18–19 November trials](../orin-nx-16gb-jp6.0/capacity.md).
-The EX3 rows use patched v0.31.0 and protocol v2; the [released EX3 baseline](../orin-nano-8gb-jp6.0/capacity.md#released-stack-results-24-november-2026)
-used protocol v1.
+**No output** is comparable across devices: both tests required at least 29
+processed FPS on every camera over 120 seconds. **Video output** is not yet
+comparable. The [EX3 trials](../orin-nano-8gb-jp6.0/capacity.md) measured frames
+delivered by the publisher and decoded from saved clips. The [EX5 output
+trials](../orin-nx-16gb-jp6.0/capacity.md#output-screening) checked publisher
+operation and recording triggers, not whether the video met the same quality
+requirements.
 
 | Device | Model | No output | WebRTC | Smart Video | WebRTC + Smart Video |
 |---|---|---:|---:|---:|---:|
@@ -26,7 +28,8 @@ used protocol v1.
 **Not qualified at 1** means detection kept up with one camera but the video
 did not. For example, with Smart Video alone, [22 of 24 clips](../orin-nano-8gb-jp6.0/capacity.md#what-the-recording-failures-mean)
 fell below 29 decoded FPS. **Not measured** means there is no EX5 result for
-that output under protocol v2.
+that output under protocol v2. The [earlier EX3 measurements](../orin-nano-8gb-jp6.0/capacity.md#earlier-measurements-protocol-v1)
+used different output checks and are not included in the table.
 
 ## What each trial does
 

@@ -61,8 +61,8 @@ The [camera benchmarks](benchmarks/capacity/README.md) use separate **test IDs**
 so the three builds can stay installed without replacing the existing AIP.
 Each trial runs just one detector on its target device. A *profile* means
 No output, WebRTC, Smart Video, or WebRTC + Smart Video, not another AIP to
-install; output profiles enable OSD. EX5 and EX3 results, and released and
-patched software results, are reported separately.
+install; output profiles enable OSD. The benchmark reports camera processing
+rate separately from the quality of the video delivered or saved.
 
 ## Node-RED dashboard
 

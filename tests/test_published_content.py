@@ -177,7 +177,7 @@ class PublishedContentTests(unittest.TestCase):
         self.assertIn("| YOLO26n | 5 | Not qualified at 1 | 3† | Not qualified at 1 |", table)
         self.assertIn("WEBRTC + SMART VIDEO", report.upper())
         for text in (matrix, comparison):
-            self.assertIn("capacity.md#released-stack-results-24-november-2026)", text)
+            self.assertIn("capacity.md#earlier-measurements-protocol-v1)", text)
         self.assertEqual({(row["device"], row["protocol"]) for row in records},
                          {("ex3-orin-nano-8gb-15w", "webrtc-smart-video-v1")})
         self.assertEqual({row["model"] for row in records if row["kind"] in {"trial", "fixed"}},
