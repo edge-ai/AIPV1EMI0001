@@ -194,7 +194,11 @@ def render_markdown(entries, notes=""):
         "TensorRT FP16, median over the timed requests, in milliseconds per image "
         "(raw model, one request at a time, not DeepStream pipeline throughput).", "",
         latency_table(entries), "",
+        "Batch counts images submitted together in one request. Milliseconds per image is the "
+        "whole-request median divided by batch size, not the response time of one image. "
+        "Images/s is derived for serial requests; the ORT speed-up compares the same batch size.", "",
         "### All precisions", "",
+        "Median milliseconds for the **whole request**, not per image.", "",
         precision_table(entries), "",
         "## FP16 against FP32", "",
         parity_table(entries), "",

@@ -7,7 +7,6 @@ import tempfile
 import types
 import unittest
 from contextlib import redirect_stdout
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,7 +24,6 @@ EX3_RESULTS = ROOT / "doc/benchmarks/orin-nano-8gb-jp6.0"
 NOTEBOOKS = ROOT / "notebooks"
 BUILD = {"yolov7": "01-build-yolov7.ipynb", "yolov10": "02-build-yolov10.ipynb", "yolo26": "03-build-yolo26.ipynb"}
 BASELINE_COLUMNS = [("720p", "base"), ("1080p", "base")]
-WEBRTC_SCREENING = [name for name in capacity.SCREENING if not capacity.parse_profile(name).eventrec]
 V2_EX3_FILES = ("capacity-protocol-v2.jsonl", "capacity-protocol-v2-recheck.jsonl",
                 "capacity-boundary-v2.jsonl")
 
@@ -45,18 +43,6 @@ def markdown(name):
 def table_rows(table):
     return [[cell.strip() for cell in line.strip().strip("|").split("|")]
             for line in table.splitlines()[2:] if line.startswith("| ")]
-
-
-def day(stamp):
-    return datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone(timezone.utc).date()
-
-
-def span(days):
-    first, last = min(days), max(days)
-    if first == last:
-        return f"{first.day} {first:%B %Y}"
-    assert (first.year, first.month) == (last.year, last.month), "spans across months are not worded yet"
-    return f"{first.day} to {last.day} {last:%B %Y}"
 
 
 class PublishedContentTests(unittest.TestCase):
@@ -84,19 +70,44 @@ class PublishedContentTests(unittest.TestCase):
         models = [entry["flavor"]["id"] for entry in self.entries]
         summary = table_rows(compare_models.summary_table(self.entries))
         cameras = table_rows(capacity.camera_table(records, models, BASELINE_COLUMNS))
-        for model, accuracy, counts in zip(models, summary, cameras):
+        ex3_records = [row for name in V2_EX3_FILES for row in capacity.load(EX3_RESULTS / name)]
+        ex3_cameras = table_rows(capacity.camera_table(ex3_records, models, [("720p", "base")]))
+        for model, accuracy, counts, ex3 in zip(models, summary, cameras, ex3_cameras):
             with self.subTest(model=model):
                 row = next(line for line in readme.splitlines()
                            if line.startswith("| [") and f"(notebooks/{BUILD[model]})" in line)
                 counts = [count.rstrip("†") for count in counts[1:]]
                 # The caption compares input resolutions, not unsupported output combinations.
                 self.assertEqual(len(set(counts)), 1, counts)
-                self.assertEqual(table_rows(f"|\n|\n{row}")[0][1:], [*accuracy[1:4], counts[0]])
+                self.assertEqual(table_rows(f"|\n|\n{row}")[0][1:], [*accuracy[1:4], counts[0], ex3[1]])
                 self.assertIn(f"| [{capacity.MODEL_NAMES[model]}]", row)
 
     def test_the_presentation_is_read_only(self):
         presentation = notebook("00-presentation.ipynb")
         self.assertFalse([cell for cell in presentation["cells"] if cell["cell_type"] == "code"])
+
+    def test_batch_reading_example_matches_recorded_request_times(self):
+        lesson = markdown("04-compare-models.ipynb")
+        request_times = {}
+        for batch in (1, 8):
+            result = compare_models.row(self.by_id["yolov10"]["latency"], compare_models.TENSORRT_FP16, batch)
+            median = result["median_ms"]
+            with self.subTest(batch=batch):
+                request_times[batch] = f"{median:.2f}"
+                self.assertIn(f"| YOLOv10n | {batch} |", lesson)
+        self.assertIn(
+            f"YOLOv10n FP16 takes **{request_times[1]} ms** for one image, "
+            f"or **{request_times[8]} ms** for eight.",
+            lesson)
+        per_image = compare_models.row(self.by_id["yolov10"]["latency"], compare_models.TENSORRT_FP16, 8)["ms_per_image"]
+        self.assertIn(f"**{per_image:.2f} ms/image**", lesson)
+        readme = (ROOT / "README.md").read_text()
+        self.assertIn("(notebooks/04-compare-models.ipynb)", readme)
+        for expected in ("The profile allows 1 through 8 images per request",
+                         "For a **one-camera, one-frame request**, start with batch 1",
+                         "an engine built to accept only one image per request",
+                         "Triton's dynamic batching"):
+            self.assertIn(expected, lesson)
 
     def test_supported_matrix_does_not_relabel_historical_output_results(self):
         readme = (ROOT / "README.md").read_text()
@@ -211,7 +222,6 @@ class PublishedContentTests(unittest.TestCase):
         claim = f"{failed} of {len(all_clips)}"
         for path in (EX3_RESULTS / "capacity.md", ROOT / "doc/benchmarks/capacity/README.md"):
             self.assertIn(claim, path.read_text())
-        self.assertIn(claim, markdown("04-compare-models.ipynb"))
 
     def test_ex3_results_and_evidence_are_published_consistently(self):
         report = (EX3_RESULTS / "capacity.md").read_text()
@@ -289,13 +299,21 @@ class PublishedContentTests(unittest.TestCase):
             self.assertLess(abs(measured - published), 0.2, entry["flavor"]["id"])
         self.assertGreaterEqual(checked, 2)
 
-    def test_the_recommended_starting_flavor_is_the_most_accurate_and_the_fastest_recorded_one(self):
-        default = "yolo26"
-        accuracy = {i: compare_models.accuracy_row(e)["metrics"]["map_50_95"] for i, e in self.by_id.items()}
-        latency = {i: compare_models.row(e["latency"], compare_models.TENSORRT_FP16, 1)["ms_per_image"]
-                   for i, e in self.by_id.items()}
-        self.assertEqual(max(accuracy, key=accuracy.get), default)
-        self.assertEqual(min(latency, key=latency.get), default)
+    def test_training_overview_explains_aip_layers_and_model_choice(self):
+        readme = (ROOT / "README.md").read_text()
+        overview = readme.split("## Choose a model", 1)[0]
+        for concept in ("primary", "secondary", "Business logic", "Node-RED", "UIBuilder"):
+            self.assertIn(concept, overview)
+        for link in ("(logic/)", "(dashboard/)",
+                     "(https://www.npmjs.com/package/@edgematrix/node-red-contrib-eais)",
+                     "(https://github.com/TotallyInformation/node-red-contrib-uibuilder)"):
+            self.assertIn(link, overview)
+        for text in (readme, markdown("00-presentation.ipynb"), markdown("04-compare-models.ipynb")):
+            self.assertIn("license", text.lower())
+            self.assertNotIn("(recommended)", text)
+            self.assertNotIn("a good first build", text)
+        self.assertIn("all nine one-camera model/profile checks passed", readme)
+        self.assertIn("multi-camera output limits have not been established", readme)
 
     def test_recorded_files_are_public_material(self):
         for path in sorted((*RESULTS.rglob("*"), *EX3_RESULTS.rglob("*"))):
@@ -349,35 +367,19 @@ class ComparisonNotebookTests(unittest.TestCase):
                     "latency": compare_models.latency_table(self.entries),
                     "precision": compare_models.precision_table(self.entries),
                     "parity": compare_models.parity_table(self.entries),
-                    "cameras": capacity.camera_table(self.records, self.models, BASELINE_COLUMNS),
-                    "headroom": capacity.headroom_table(self.records, self.models, profiles=("base",)),
-                    "screening": capacity.screening_table(self.records, profiles=WEBRTC_SCREENING)}
+                    "cameras": capacity.camera_table(self.records, self.models, BASELINE_COLUMNS)}
         for name, table in expected.items():
             with self.subTest(table=name):
                 self.assertIn(table, self.text)
         self.assertIn(f"]({os.path.relpath(RESULTS / 'comparison.png', NOTEBOOKS)})", self.text)
 
-    def test_the_measurement_dates_come_from_the_evidence(self):
-        accuracy = {day(json.loads(path.read_text())["utc"]) for path in RESULTS.glob("*-accuracy.json")}
-        latency = {day(json.loads(path.read_text())["utc"]) for path in RESULTS.glob("*-latency.json")}
-        trials = [row["trial"] if row["kind"] == "fixed" else row for row in self.records
-                  if row["kind"] in ("trial", "fixed")]
-        cameras = {day(attempt["started"]) for trial in trials for attempt in (trial.get("attempts") or [trial])}
-        ex3_records = capacity.load(EX3_RESULTS / "capacity.jsonl")
-        ex3_trials = [row["trial"] if row["kind"] == "fixed" else row for row in ex3_records
-                      if row["kind"] in ("trial", "fixed")]
-        ex3_cameras = {day(attempt["started"]) for trial in ex3_trials
-                       for attempt in (trial.get("attempts") or [trial]) if attempt.get("started")}
-        checks = json.loads((RESULTS / "capacity-outputs.json").read_text())["checks"]
-        outputs = {day(check["probe"]["t"]) for check in checks}
-        output_v2 = {day(row["started"]) for row in capacity.load(RESULTS / "capacity-output-v2.jsonl")}
-        for text in (f"| Accuracy | {span(accuracy)} |", f"| Inference time | {span(latency)} |",
-                     f"| Camera capacity (EX5) | {span(cameras)} | {len(trials)} live RTSP trials",
-                     f"| Output checks (EX5) | {span(output_v2)} | Nine one-camera model/profile checks under protocol v2",
-                     f"| Camera capacity (EX3) | {span(ex3_cameras)} | 720p, WebRTC and Smart Video tests",
-                     f"| Output checks | {span(outputs)} | {len(checks)} YOLO26n WebRTC-only output diagnostics |"):
-            with self.subTest(text=text):
-                self.assertIn(text, self.text)
+    def test_the_comparison_lesson_links_detailed_measurement_evidence(self):
+        for expected in ("## 4. Where do these results come from?",
+                         "../doc/benchmarks/orin-nx-16gb-jp6.0/capacity.md",
+                         "../doc/benchmarks/orin-nano-8gb-jp6.0/capacity.md",
+                         "../doc/benchmarks/orin-nx-16gb-jp6.0/conditions.md",
+                         "not a controlled, scene-identical comparison"):
+            self.assertIn(expected, self.text)
 
     def test_only_the_optional_cells_run_code_and_they_find_the_repository(self):
         cells = notebook("04-compare-models.ipynb")["cells"]
