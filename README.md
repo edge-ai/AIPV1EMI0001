@@ -6,23 +6,25 @@ This repository is a working **AI Processor (AIP)** for the [EdgeAI Station](htt
 
 ## How it works
 
-**One AI Processor, one detector per build.** The three folders under [`flavors/`](flavors/) are recipes, not separate AIPs. The v7.0.0 release uses YOLO26n; building another flavor changes the detector, not the `AIPV1EMI0001` ID. The top-level `configs/` and `models/` are the [layout the station reads](doc/USER_MANUAL.md#where-model-settings-live), not a legacy detector.
+**One AI Processor, one detector per build.** The three folders under [`flavors/`](flavors/) are recipes, not separate AIPs. The v7.0.0 release uses YOLO26n; building another flavor changes the detector, not the `AIPV1EMI0001` ID. The station reads the selected model's settings from `configs/` and `models/`. The build copies them there from `flavors/`, and Git doesn't track those copies ([details](doc/USER_MANUAL.md#where-model-settings-live)).
 
 NVIDIA DeepStream decodes the video, runs the selected TensorRT engine through Triton, and tracks detections across frames. The same [callback](callback.py) turns those detections into counts for the dashboard. All three models use official pretrained weights; no training dataset is needed.
 
 ## Choose a model
 
-YOLO26n is the default and a good first build. YOLOv10n scored almost identically on the three application classes; the compact anchor-based model is the original flavor. Each model has its own build notebook.
+YOLO26n is the default and a good first build. YOLOv10n scored almost identically on the three application classes; YOLOv7-tiny is the original anchor-based flavor. Each model has its own build notebook.
 
-| Model and build notebook | mAP 50:95, 80 COCO classes (published) | mAP 50:95, car / person / truck | FP16 ms per image | 720p30 cameras, no output | 720p30 cameras, all outputs |
-|---|---:|---:|---:|---:|---:|
-| [YOLO26n](notebooks/03-build-yolo26.ipynb) | 39.92 (40.1) | 40.67 | 5.3 | 7 | 7 |
-| [YOLOv10n](notebooks/02-build-yolov10.ipynb) | 38.34 (38.5) | 40.54 | 5.5 | 6 | 6 |
-| [Tiny anchor-based model](notebooks/01-build-yolov7.ipynb) | 37.13 (n/a) | 39.41 | 8.4 | 4 | 4 |
+| Model and build notebook | mAP 50:95, 80 COCO classes (published) | mAP 50:95, car / person / truck | FP16 ms per image | EX5 720p30 cameras, no output |
+|---|---:|---:|---:|---:|
+| [YOLO26n](notebooks/03-build-yolo26.ipynb) | 39.92 (40.1) | 40.67 | 5.3 | 7 |
+| [YOLOv10n](notebooks/02-build-yolov10.ipynb) | 38.34 (38.5) | 40.54 | 5.5 | 6 |
+| [YOLOv7-tiny](notebooks/01-build-yolov7.ipynb) | 37.13 (n/a) | 39.41 | 8.4 | 4 |
 
-Measured on one **Jetson Orin NX 16 GB** (JetPack 6.0, TensorRT 8.6, FP16 engines) from 17 to 19 November 2026. Accuracy uses all 5,000 COCO val2017 images; the authors' published score is in brackets. Inference time is for one image on an idle GPU, without decoding or tracking. A camera count passed when every 30 FPS H.264 camera averaged at least **29 processed FPS**. *All outputs* means continuous recording, WebRTC, HLS and event recording with on-screen boxes; they used part of the margin but didn't lower the counts. 1080p cameras without output gave the same counts.
+Measured on one **EX5 / Jetson Orin NX 16 GB** (JetPack 6.0, TensorRT 8.6, FP16 engines) from 17 to 19 November 2026. Accuracy uses all 5,000 COCO val2017 images; the authors' published score is in brackets. Inference time is for one image on an idle GPU, without decoding or tracking. A camera count passed when every 30 FPS H.264 camera averaged at least **29 processed FPS**. 1080p cameras without output gave the same counts.
 
-The [comparison notebook](notebooks/04-compare-models.ipynb) shows every table, the chart and the test dates without running code. The [capacity report](doc/benchmarks/orin-nx-16gb-jp6.0/capacity.md) has the raw trials and known limitations, including one-camera WebRTC and recording failures on the test build.
+The [comparison notebook](notebooks/04-compare-models.ipynb) explains the accuracy, latency and [EX5 camera counts](doc/benchmarks/orin-nx-16gb-jp6.0/capacity.md). On the [EX3](doc/benchmarks/orin-nano-8gb-jp6.0/capacity.md), YOLO26n and YOLOv10n each sustained **5 cameras** without video output; YOLOv7-tiny sustained **3**.
+
+The [EX3/EX5 matrix](doc/benchmarks/capacity/README.md) also covers WebRTC, Smart Video recording, and both together. With one EX3 camera, detection stayed near 30 FPS but the streamed or recorded video fell short of the quality requirements. EX5 has not been measured with those delivery checks.
 
 ## Get started
 
@@ -46,7 +48,7 @@ Three SHA-256-verified **v7.0.0** engines are available from the [Hugging Face m
 |---|---|---|
 | YOLO26n | [TensorRT engine](https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/ae3bd8c672013b3bb04a9af262130dcbaa41a109/orin-nx-16gb-jp6.0/yolo26-fp16-1x8x8.engine) | `0cb26f248c60759893471f9966d293b62faa812a7d98bd69183d0c99a7f96802` |
 | YOLOv10n | [TensorRT engine](https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/ae3bd8c672013b3bb04a9af262130dcbaa41a109/orin-nx-16gb-jp6.0/yolov10-fp16-1x8x8.engine) | `8add86b6a31ec672381cf5b23d56f62c8cfcb0f30812d1591d039cc67300c85f` |
-| Tiny anchor-based model | [TensorRT engine](https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/ae3bd8c672013b3bb04a9af262130dcbaa41a109/orin-nx-16gb-jp6.0/yolov7-fp16-1x8x8.engine) | `c9da0f95ec3f10cc2d5cd213dbfc364a932478a4e884b1d873cf69919842fa5c` |
+| YOLOv7-tiny | [TensorRT engine](https://huggingface.co/Edgematrix-JP/AIPV1EMI0001/resolve/ae3bd8c672013b3bb04a9af262130dcbaa41a109/orin-nx-16gb-jp6.0/yolov7-fp16-1x8x8.engine) | `c9da0f95ec3f10cc2d5cd213dbfc364a932478a4e884b1d873cf69919842fa5c` |
 
 The [user manual](doc/USER_MANUAL.md#tensorrt-engine-files) covers engine compatibility and release artifacts.
 

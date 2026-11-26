@@ -41,6 +41,9 @@ class ReleaseSafeguardsTests(unittest.TestCase):
 
     def test_release_takes_the_engine_of_the_active_flavor_and_verifies_it(self):
         self.assertIn("python3 tools/flavors.py check", RELEASE)
+        self.assertLess(RELEASE.index('python3 tools/flavors.py use "$FLAVOR"'),
+                        RELEASE.index("python3 tools/flavors.py check"))
+        self.assertIn("git diff --exit-code -- manifest.json store.json LICENSE.weights", RELEASE)
         self.assertIn("engine_asset.url", RELEASE)
         self.assertIn("engine_asset.sha256", RELEASE)
         self.assertIn("sha256sum -c -", RELEASE)
@@ -63,7 +66,7 @@ class ReleaseSafeguardsTests(unittest.TestCase):
 
     def test_weights_licence_ships_with_the_package(self):
         self.assertIn("LICENSE.weights", (ROOT / ".include").read_text())
-        flavor = flavors.load(ROOT, flavors.check(ROOT))
+        flavor = flavors.load(ROOT, flavors.active_id(ROOT))
         self.assertEqual((ROOT / "LICENSE.weights").read_bytes(), (ROOT / flavor["weights_license"]).read_bytes())
         self.assertIn("LICENSE.weights", RELEASE)
 
@@ -82,7 +85,7 @@ class ReleaseSafeguardsTests(unittest.TestCase):
                 assert_no_private_references(self, path.read_text(), path.name)
 
     def test_the_manifest_licence_names_the_packaged_weights(self):
-        flavor = flavors.load(ROOT, flavors.check(ROOT))
+        flavor = flavors.load(ROOT, flavors.active_id(ROOT))
         manifest = json.loads((ROOT / "manifest.json").read_text())
         self.assertEqual(manifest["license"], flavor["license"])
         self.assertRegex(manifest["license"], r"^Apache-2\.0 AND A?GPL-3\.0-only$")

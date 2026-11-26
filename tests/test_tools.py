@@ -17,10 +17,11 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 import benchmark  # noqa: E402
 import check_package  # noqa: E402
+import flavors  # noqa: E402
 from public_reference import assert_no_private_references  # noqa: E402
 
 
-FLAVOR_FILES = ("manifest.json", "store.json", "LICENSE.weights", f"{check_package.MODEL_DIR}/config.pbtxt")
+FLAVOR_FILES = ("manifest.json", "store.json", "LICENSE.weights")
 
 
 def package_fixture(directory):
@@ -32,6 +33,7 @@ def package_fixture(directory):
     for name in FLAVOR_FILES:
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / name, root / name)
+    flavors.use(root, flavors.active_id(root))
     names = check_package.eais_files(root) | check_package.include_entries(ROOT)
     for name in names:
         path = root / name

@@ -5,8 +5,10 @@ YOLO object detector for the EdgeAI Station: real-time detection of
 (region of interest) and LCC (line crossing counter) analytics. The package
 carries one detector, chosen at build time among YOLOv7-tiny, YOLOv10n and YOLO26n;
 the [model comparison](../notebooks/04-compare-models.ipynb) explains the differences.
-The manifest allows up to 8 inputs; [measured camera capacity](benchmarks/orin-nx-16gb-jp6.0/capacity.md)
-depends on the detector, frame rate and pipeline settings.
+The manifest allows up to 8 inputs; [measured EX3/EX5 camera capacity](benchmarks/capacity/README.md)
+depends on the detector, frame rate and pipeline settings. A video-quality failure
+is not a detection camera limit. The prebuilt EX5 engines and its accuracy/latency
+measurements do not qualify the same engine or performance on EX3.
 
 ## Requirements
 
@@ -41,9 +43,13 @@ installation. There is no `options.json` or runtime model selector.
 | Tracking or counting for every detector | Edit the shared [`configs/config_tracker_NvDCF_perf.yml`](../configs/config_tracker_NvDCF_perf.yml) or [`callback.py`](../callback.py). The shared class list lives in [`labels-rev3.txt`](../models/AIPV1EMI0001_Yolo_Detector/labels-rev3.txt). |
 
 For example, in a **development checkout**, `python3 tools/flavors.py use yolov10` copies the YOLOv10n
-inference settings into the top-level `configs/` and `models/` folders and
-updates the manifest, store metadata and weights license. Don't edit those
-copied settings by hand: the next selection overwrites them. By default the
+inference settings into the top-level `configs/` and `models/` folders, where the
+station expects them, and updates the manifest, store metadata and weights
+license. [`bin/build.sh`](../bin/build.sh) does this before every build. The
+copied `config_infer_primary_detector_<id>.txt` and `config.pbtxt` are
+git-ignored, so a fresh clone has only the shared tracker config and class list
+there until you select or build a model. Don't edit the copies by hand: the next
+selection overwrites them. By default the
 DeepStream configs set a confidence threshold of 0.35 and NMS IoU of 0.65.
 `python3 tools/flavors.py list` shows the selection (`*`), and
 `python3 tools/flavors.py check` checks that the files match the recipe.
@@ -51,11 +57,12 @@ Selection alone does not build an engine or install a package. The
 [YOLOv10n notebook](../notebooks/02-build-yolov10.ipynb) builds the engine,
 exports the package and shows how to verify the registered detector.
 
-The [camera benchmarks](benchmarks/orin-nx-16gb-jp6.0/capacity.md#test-conditions)
-used separate **test IDs** so the three builds could stay installed without
-replacing the existing AIP. Each trial ran just one detector. In that report a
-*profile* describes pipeline settings such as recording, OSD and streaming,
-not another AIP to install.
+The [camera benchmarks](benchmarks/capacity/README.md) use separate **test IDs**
+so the three builds can stay installed without replacing the existing AIP.
+Each trial runs just one detector on its target device. A *profile* means
+No output, WebRTC, Smart Video, or WebRTC + Smart Video, not another AIP to
+install; output profiles enable OSD. The benchmark reports camera processing
+rate separately from the quality of the video delivered or saved.
 
 ## Node-RED dashboard
 

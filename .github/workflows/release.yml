@@ -67,8 +67,12 @@ jobs:
       # checksum of the active flavor live in flavors/<id>/flavor.json (engine_asset).
       - name: Download the TensorRT engine of the active flavor
         run: |
-          python3 tools/flavors.py check
+          # The inference config and config.pbtxt are not tracked: generate them from the recipe,
+          # then make sure the committed manifest, store metadata and weights license already matched it.
           FLAVOR=$(python3 tools/flavors.py active)
+          python3 tools/flavors.py use "$FLAVOR"
+          python3 tools/flavors.py check
+          git diff --exit-code -- manifest.json store.json LICENSE.weights
           ENGINE=$(python3 tools/flavors.py get "$FLAVOR" engine)
           URL=$(python3 tools/flavors.py get "$FLAVOR" engine_asset.url)
           SHA256=$(python3 tools/flavors.py get "$FLAVOR" engine_asset.sha256)

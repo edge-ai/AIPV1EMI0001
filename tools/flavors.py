@@ -13,9 +13,13 @@ flavors/<id>/ and copies the chosen one to the places EAIS Tools reads.
 `use` rewrites these files from flavors/<id>/:
 
     manifest.json, store.json              name, description, license, model and config_plan
-    configs/<infer_config>                 DeepStream nvinferserver configuration
-    models/AIPV1EMI0001_Yolo_Detector/config.pbtxt   Triton model configuration
+    configs/<infer_config>                 DeepStream nvinferserver configuration (generated, not in git)
+    models/AIPV1EMI0001_Yolo_Detector/config.pbtxt   Triton model configuration (generated, not in git)
     LICENSE.weights                        licence text of the packaged weights
+
+The two configuration copies are git-ignored so each setting has a single source in flavors/<id>/.
+bin/build.sh runs `use` before every build. The committed manifest.json, store.json and
+LICENSE.weights stay in git because they describe the published AI Processor.
 """
 import argparse
 import json
