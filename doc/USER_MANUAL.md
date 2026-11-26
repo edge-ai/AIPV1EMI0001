@@ -25,8 +25,8 @@ measurements do not qualify the same engine or performance on EX3.
 3. Create a pipeline that uses the AIP. No Triton registration is needed: inference
    runs inside the DeepStream pipeline (`nvinferserver`).
 
-To build from source instead, follow the build notebook of the model you want, for example
-[`03-build-yolo26.ipynb`](../notebooks/03-build-yolo26.ipynb).
+To build from source instead, [choose a model](../README.md#choose-a-model)
+that fits your application and license requirements, then follow its build notebook.
 
 ## Configuration
 

@@ -26,7 +26,11 @@ TensorRT FP16, median over the timed requests, in milliseconds per image (raw mo
 | YOLOv10n | 5.50 (182 img/s, 3.3x ORT) | 4.09 (244 img/s, 3.7x ORT) | 3.76 (266 img/s, 3.7x ORT) |
 | YOLOv7-tiny | 8.40 (119 img/s, 2.9x ORT) | 5.31 (188 img/s, 4.3x ORT) | 4.74 (211 img/s, 4.1x ORT) |
 
+Batch counts images submitted together in one request. Milliseconds per image is the whole-request median divided by batch size, not the response time of one image. Images/s is derived for serial requests; the ORT speed-up compares the same batch size.
+
 ### All precisions
+
+Median milliseconds for the **whole request**, not per image.
 
 | Model | Batch | ONNX Runtime CUDA FP32 | TensorRT FP32 | TensorRT FP16 |
 |---|---:|---:|---:|---:|

@@ -81,6 +81,8 @@ class CompareModelsTests(unittest.TestCase):
         text = compare_models.render_markdown(compare_models.collect(self.path, ROOT))
         for expected in ("R36 (release), REVISION: 3.0", "TensorRT 8.6.2.3", "ONNX Runtime 1.19.0", "5000 COCO val2017 images",
                          "latency uses synthetic GPU-resident inputs", "separate runs",
+                         "whole-request median divided by batch size, not the response time of one image",
+                         "Median milliseconds for the **whole request**, not per image",
                          "mAP 50:95 is the metric Ultralytics reports",
                          "- **YOLO26n** (40.1): Ultralytics, mAP val 50-95 (e2e) column"):
             self.assertIn(expected, text)
