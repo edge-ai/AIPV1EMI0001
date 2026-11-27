@@ -12,6 +12,7 @@ one N, which is how the cheap one-factor screening runs are done. Plain stdlib, 
         --rtsp-template 'rtsp://VCAM:PORT/cam{index:02d}' --profile base --out capacity.jsonl
     python3 tools/capacity.py fixed  ... --device ex3 --n 4 --profile webrtc+evt-osd
     python3 tools/capacity.py summarize capacity.jsonl
+    python3 tools/capacity.py compare-matched EX3.jsonl EX5.jsonl
     python3 tools/capacity.py cleanup --ms3 http://MS3:8000 --ledger capacity.jsonl.owned.json
 
 doc/benchmarks/capacity/README.md explains why this is a pruned plan and not every combination. Every run gets its
@@ -58,6 +59,7 @@ WEBRTC_PROBE_SECONDS = 20
 # Read from inside the MS3 container, the same MediaMTX path that WebRTC viewers are served from.
 WEBRTC_READ_URL = "rtsp://host.docker.internal:8554/{uuid}_{slot}"
 DEFAULT_TILER = (1280, 720)
+MATCHED_INPUT = {"codec_name": "h264", "width": 1280, "height": 720, "avg_frame_rate": "30/1"}
 NAME_PREFIX = "cap-"
 # Slot 2 is the MediaMTX source for the WebRTC publisher.
 WEBRTC_SLOT = 2
@@ -156,13 +158,13 @@ def validate_live_profile(config):
                             "(Smart Video recording), or webrtc+evt, optionally with -osd")
 
 
-def pipeline_setup(name, config, aip, media_uuids, *, tiler=None):
+def pipeline_setup(name, config, aip, media_uuids, *, tiler=None, matched=False):
     """The request body for POST /pipeline. `aip` is an /aiprocessors record."""
     validate_live_profile(config)
     count = len(media_uuids)
     width, height = tiler or config.tiler
     mtx = config.webrtc
-    return {"pipeline": {
+    setup = {
         "name": name,
         "description": "Capacity test created by tools/capacity.py",
         "auto_reload": False,
@@ -186,7 +188,72 @@ def pipeline_setup(name, config, aip, media_uuids, *, tiler=None):
                                "pre_duration": SMART_PRE_MS, "post_duration": SMART_POST_MS,
                                "max_duration": SMART_MAX_MS},
         "ntp_mode": "auto",
-    }}
+    }
+    if matched:
+        setup["osd_setup"].update(clock=False, bbox=True, text=True, mask=False, analytics=0)
+        setup["eventrec_sink_setup"].update(control_rate=1, iframeinterval=5)
+        if mtx:
+            setup["mtx_output_sink_setup"].update(webrtc_control_rate=1, webrtc_key_frame_interval_sec=1.0)
+    return {"pipeline": setup}
+
+
+def matched_parameters(setup):
+    processor = setup["ai_processor_setup"]
+    return {"input": setup["inputs"][0]["media_setup"],
+            "processor": {k: v for k, v in processor.items() if k not in ("uuid", "batch_size")},
+            "requested_batch_size": processor["batch_size"],
+            **{name: setup[name + "_setup"] for name in
+               ("tiler", "osd", "mtx_output_sink", "eventrec_sink", "nodered_output_data", "websocket_output_data")}}
+
+
+def matched_readback(ms3, uuid_, setup):
+    """Verify the station retained the requested settings. Keep no URLs, credentials or station IDs."""
+    detail = ms3.call("GET", f"/pipeline/{uuid_}")
+
+    def checked(label, actual, expected):
+        for key, value in expected.items():
+            if not isinstance(actual, dict) or key not in actual or actual[key] != value:
+                raise CapacityError(f"matched setup: {label}.{key} does not match the requested {value!r}")
+        return {key: actual[key] for key in expected}
+
+    inputs = detail.get("input_sources") or []
+    if len(inputs) != 1 or len(setup["inputs"]) != 1:
+        raise CapacityError("matched setup requires exactly one camera")
+    if ((inputs[0].get("media") or {}).get("pk") != setup["inputs"][0]["media_uuid"]
+            or "analytic_settings" not in inputs[0] or inputs[0]["analytic_settings"] is not None):
+        raise CapacityError("matched setup: unexpected camera or analytics enabled")
+    selected = detail.get("ai_processor_settings") or {}
+    checked("ai_processor", selected.get("ai_processor"), {"pk": setup["ai_processor_setup"]["uuid"]})
+    expected = matched_parameters(setup)
+    processor = selected.get("config") or {}
+    actual = {"input": inputs[0].get("media_settings"), "processor": processor}
+    result = {name: checked(name, actual.get(name, detail.get(name + "_settings")), values)
+              for name, values in expected.items() if name != "requested_batch_size"}
+    for name in ("rtsp_output_sink", "hls_output_sink"):
+        checked(name, detail.get(name + "_settings"), {"active": False})
+    # Some station versions omit batch_size from GET /pipeline even when it was requested.
+    if "batch_size" in processor:
+        checked("processor", processor, {"batch_size": expected["requested_batch_size"]})
+    return {**result, "requested_batch_size": expected["requested_batch_size"]}
+
+
+def matched_source(ffprobe, uri, sha256):
+    """The digest identifies the publisher's encoded file; the RTSP probe checks the actual stream format."""
+    if not re.fullmatch(r"[a-f0-9]{64}", sha256):
+        raise CapacityError("supply the SHA-256 of the looped source file from its publisher")
+    if not uri.startswith("rtsp://") or "{" in uri or "}" in uri:
+        raise CapacityError("matched runs require one literal RTSP source, not a template")
+    try:
+        probe = subprocess.run([ffprobe, "-v", "error", "-rtsp_transport", "tcp", "-select_streams", "v:0",
+                                "-show_entries", "stream=codec_name,width,height,avg_frame_rate", "-of", "json", uri],
+                               capture_output=True, text=True, timeout=20, check=True)
+        stream, = json.loads(probe.stdout)["streams"]
+        observed = {k: stream[k] for k in ("codec_name", "width", "height", "avg_frame_rate")}
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError) as error:
+        raise CapacityError("could not verify the matched RTSP source with ffprobe") from error
+    if observed != MATCHED_INPUT:
+        raise CapacityError(f"matched source must be H.264 1280x720 at 30 FPS; got {observed}")
+    return {"file_sha256": sha256, **observed}
 
 
 # ---- Judging a trial ----
@@ -328,7 +395,7 @@ def require_valid_trial(trial):
     for attempt in trial.get("attempts") or [trial]:
         errors = ([attempt["error"]] if attempt.get("error") else []) + attempt.get("cleanup_errors", [])
         if errors:
-            raise CapacityError("trial invalid; search stopped: " + "; ".join(errors))
+            raise CapacityError("trial invalid: " + "; ".join(errors))
 
 
 # ---- tegrastats ----
@@ -580,11 +647,14 @@ def recording_files(signaling, uuid_):
         page += 1
 
 
-def start_outputs(ms3, signaling, uuid_, config):
+def start_outputs(ms3, signaling, uuid_, config, *, matched=False):
     """Start the WebRTC publisher. Smart Video buffers automatically and is triggered during sampling."""
     validate_live_profile(config)
     if config.webrtc:
-        retrying(lambda: ms3.call("POST", f"/pipeline/{uuid_}/mtx/start", query={"stream_index": WEBRTC_SLOT}))
+        query = {"stream_index": WEBRTC_SLOT}
+        if matched:
+            query["bitrate"] = config.bitrate
+        retrying(lambda: ms3.call("POST", f"/pipeline/{uuid_}/mtx/start", query=query))
 
 
 def smart_records(ms3, uuid_):
@@ -662,13 +732,14 @@ def start_webrtc_probe(ffprobe, uuid_, *, seconds=WEBRTC_PROBE_SECONDS, url=WEBR
     source = url.format(uuid=uuid_, slot=WEBRTC_SLOT)
     try:
         return subprocess.Popen([ffprobe, "-v", "error", "-rtsp_transport", "tcp", "-read_intervals", f"%+{seconds:g}",
-                                 "-select_streams", "v:0", "-show_entries", "packet=pts_time,flags", "-of", "json",
-                                 source], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                 "-select_streams", "v:0", "-show_entries",
+                                 "packet=pts_time,flags:stream=codec_name,width,height", "-of", "json", source],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     except OSError as error:
         raise CapacityError(f"WebRTC delivery probe could not start: {error}") from error
 
 
-def finish_webrtc_probe(process, *, timeout=WEBRTC_PROBE_SECONDS + 60):
+def finish_webrtc_probe(process, *, timeout=WEBRTC_PROBE_SECONDS + 60, tiler=None):
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as error:
@@ -678,9 +749,18 @@ def finish_webrtc_probe(process, *, timeout=WEBRTC_PROBE_SECONDS + 60):
     if process.returncode:
         raise CapacityError(f"WebRTC delivery probe failed: {stderr.strip()[:300]}")
     try:
-        continuity = packet_continuity(json.loads(stdout).get("packets"))
+        data = json.loads(stdout)
+        continuity = packet_continuity(data.get("packets"))
     except ValueError as error:
         raise CapacityError("WebRTC delivery probe returned invalid JSON") from error
+    if tiler is not None:
+        streams = data.get("streams") or []
+        if len(streams) != 1 or (streams[0].get("codec_name"), streams[0].get("width"), streams[0].get("height")) != (
+                "h264", *tiler):
+            observed = [(s.get("codec_name"), s.get("width"), s.get("height")) for s in streams]
+            raise CapacityError(f"WebRTC publisher did not deliver the requested H.264 {tiler[0]}x{tiler[1]} mosaic; "
+                                f"observed {observed}")
+        continuity.update(codec="h264", width=tiler[0], height=tiler[1])
     fps = (continuity["packets"] - 1) / continuity["span_seconds"] if continuity["span_seconds"] > 0 else 0.0
     return {**continuity, "delivered_fps": round(fps, 2),
             "pass": fps >= PASS_FPS and gap_ok(continuity["max_gap_seconds"])}
@@ -869,7 +949,7 @@ class Session:
             time.sleep(min(self.interval, max(0, self.window - (time.monotonic() - clock))))
         return begin, time.time()
 
-    def trial(self, count, config):
+    def trial(self, count, config, *, source=None):
         """One pipeline with `count` cameras: start, settle, sample, tear down. Returns the trial record."""
         validate_live_profile(config)
         self.trials += 1
@@ -885,12 +965,15 @@ class Session:
         try:
             if not 1 <= count <= len(self.media):
                 raise CapacityError(f"{count} cameras asked for but this run registered {len(self.media)}")
-            uuid_ = self.ms3.call("POST", "/pipeline",
-                                  body=pipeline_setup(name, config, self.aip, self.media[:count]))["pk"]
+            body = pipeline_setup(name, config, self.aip, self.media[:count], matched=source is not None)
+            uuid_ = self.ms3.call("POST", "/pipeline", body=body)["pk"]
             self.ledger.add("pipelines", uuid_, name=name, profile=config.name, run=self.run)
+            if source is not None:
+                record["matched_setup"] = {"source": source, "pipeline": matched_readback(
+                    self.ms3, uuid_, body["pipeline"])}
             self.ms3.call("POST", f"/pipeline/{uuid_}/start")
             wait_for_inputs(self.ms3, uuid_, count)
-            start_outputs(self.ms3, self.signaling, uuid_, config)
+            start_outputs(self.ms3, self.signaling, uuid_, config, matched=source is not None)
             self.log(f"  n={count} {config.name}: settling for {self.warmup:g} s")
             time.sleep(self.warmup)
             samples = record["samples"]
@@ -906,7 +989,8 @@ class Session:
             if self.tegrastats is not None:
                 record["tegrastats"] = self.tegrastats.between(begin, end)
             if webrtc_probe is not None:
-                delivery = record["webrtc_delivery"] = finish_webrtc_probe(webrtc_probe)
+                delivery = record["webrtc_delivery"] = finish_webrtc_probe(
+                    webrtc_probe, tiler=config.tiler if source is not None else None)
                 if not delivery["pass"]:
                     record["pass"] = False
                     record["reasons"].append(
@@ -1097,7 +1181,7 @@ def summarize(records):
                   "Not qualified at N means the checks did not establish a passing capacity at that count, "
                   "not that N cameras are supported. - means no measurements."]
         if contested_any:
-            lines.append("† A higher count passed in at least one trial but failed in another.")
+            lines.append("† A higher count passed in some attempts and failed in others.")
     if fixed:
         lines += ["", "| Model | AIP | Camera set | Profile | Cameras | Min processed FPS | All checks pass | GPU % | CPU % | NVENC MHz | Highest mean utilization |",
                   "|---|---|---|---|---:|---:|---|---:|---:|---:|---|"]
@@ -1184,7 +1268,7 @@ def camera_table(records, models=MODELS, columns=None):
             cells.append(f"{'' if bounded else '≥'}{count}{'†' if contested else ''}")
         lines.append(f"| {MODEL_NAMES[model]} | " + " | ".join(cells) + " |")
     if contested_any:
-        lines += ["", "† A higher count passed in one trial and failed in another; the table keeps the lower count."]
+        lines += ["", "† A higher count passed in some attempts and failed in others; the table keeps the lower count."]
     return "\n".join(lines)
 
 
@@ -1243,6 +1327,7 @@ def full_factorial():
 
 SCREENING = ("base", "webrtc", "webrtc-osd", "evt", "evt-osd", "webrtc+evt-osd",
              "webrtc-osd-1M", "webrtc-osd-4M", "webrtc-osd-640x360", "webrtc-osd-1920x1080")
+MATCHED_PROFILES = (*SCREENING, "webrtc+evt")
 CAPACITY_PROFILES = ("webrtc-osd", "evt-osd", "webrtc+evt-osd")
 CAMERA_PROBES = 2
 
@@ -1371,6 +1456,103 @@ def command_fixed(args):
         require_valid_trial(trial)
 
 
+def command_matched(args):
+    source = matched_source(args.live_ffprobe or args.ffprobe, args.rtsp_template, args.source_sha256)
+    profiles = (args.profile,) if args.profile else MATCHED_PROFILES
+    for profile in profiles:
+        config = parse_profile(profile)
+        with open_session(args, config, 1, exact=True) as session:
+            trial = session.trial(1, config, source=source)
+            result = {"kind": "fixed", "stage": "matched-one-camera", "camera_tag": args.camera_tag,
+                      "model": args.model, "profile": profile, **session.provenance(), "trial": trial}
+        # Camera deletion is confirmed when open_session exits; never publish a success before then.
+        append(args.out, result)
+        require_valid_trial(trial)
+
+
+def matched_comparison(left, right):
+    """Compare measured cases only; never substitute profile defaults for missing station readbacks."""
+    def index(records):
+        devices = {row.get("device") for row in records}
+        if len(devices) != 1 or not all(devices):
+            raise CapacityError("each matched file must contain results from exactly one named device")
+        cases, model_versions = {}, {}
+        for row in records:
+            key = row.get("model"), row.get("profile")
+            trial = row.get("trial") or {}
+            if (row.get("stage") != "matched-one-camera" or row.get("kind") != "fixed"
+                    or key[0] not in MODELS or key[1] not in MATCHED_PROFILES or trial.get("n") != 1
+                    or not row.get("model_verified") or not (row.get("aip") or {}).get("version")
+                    or row.get("protocol") != PROTOCOL):
+                raise CapacityError(f"{key}: not a verified matched one-camera trial")
+            version = row["aip"]["version"]
+            if model_versions.setdefault(key[0], version) != version:
+                raise CapacityError(f"{key}: AIP version changed between profiles for this model")
+            require_valid_trial(trial)
+            setup = trial.get("matched_setup") or {}
+            source = setup.get("source") or {}
+            config = parse_profile(key[1])
+            pipeline = pipeline_setup("matched", config, {"pk": ""}, [""], matched=True)["pipeline"]
+            if (not re.fullmatch(r"[0-9a-f]{64}", str(source.get("file_sha256", "")))
+                    or any(source.get(k) != value for k, value in MATCHED_INPUT.items())
+                    or setup.get("pipeline") != matched_parameters(pipeline)):
+                raise CapacityError(f"{key}: source identity or pipeline settings do not match the specification")
+            timings = tuple(trial.get(k) for k in ("warmup_seconds", "window_seconds", "interval_seconds"))
+            if timings != (WARMUP_SECONDS, WINDOW_SECONDS, SAMPLE_SECONDS):
+                raise CapacityError(f"{key}: sampling times differ from the matched protocol")
+            delivery = trial.get("webrtc_delivery") or {}
+            smart = trial.get("smart_video") or {}
+            if bool(delivery) != config.webrtc or bool(smart.get("clips")) != config.eventrec:
+                raise CapacityError(f"{key}: observed outputs differ from the requested profile")
+            if config.webrtc and (delivery.get("codec"), delivery.get("width"), delivery.get("height")) != (
+                    "h264", *config.tiler):
+                raise CapacityError(f"{key}: publisher format differs from the requested mosaic")
+            if config.eventrec:
+                recording_times = tuple(smart.get(k) for k in (
+                    "pre_duration_ms", "post_duration_ms", "max_duration_ms", "trigger_interval_seconds"))
+                if recording_times != (SMART_PRE_MS, SMART_POST_MS, SMART_MAX_MS, SMART_TRIGGER_SECONDS):
+                    raise CapacityError(f"{key}: recording times differ from the matched protocol")
+                if any((c.get("codec"), c.get("width"), c.get("height")) != ("h264", *config.tiler)
+                       for c in smart["clips"]):
+                    raise CapacityError(f"{key}: clip format differs from the requested mosaic")
+            if key in cases:
+                raise CapacityError(f"{key}: duplicate case; compare one repetition at a time")
+            cases[key] = row
+        return devices.pop(), cases
+
+    a, b = index(left), index(right)
+    if a[0] == b[0] or a[1].keys() != b[1].keys():
+        raise CapacityError("two different devices with the same model/profile cases are required")
+    lines = [f"{len(a[1])} of {len(MODELS) * len(MATCHED_PROFILES)} matched one-camera cases; "
+             "one run per station in each case.", "",
+             f"| Model | Profile | {a[0]} | {b[0]} |", "|---|---|---|---|"]
+    source = next(iter(a[1].values()))["trial"]["matched_setup"]["source"]
+    for model, profile in product(MODELS, MATCHED_PROFILES):
+        if (model, profile) not in a[1]:
+            continue
+        config = parse_profile(profile)
+        first, second = (cases[(model, profile)] for _, cases in (a, b))
+        trials = [row["trial"] for row in (first, second)]
+        if (first["aip"]["version"] != second["aip"]["version"]
+                or trials[0]["matched_setup"] != trials[1]["matched_setup"]
+                or trials[0]["matched_setup"]["source"] != source):
+            raise CapacityError(f"{model} {profile}: source, pipeline settings or AIP version differ")
+        cells = []
+        for trial in trials:
+            parts = ["Pass" if trial["pass"] else "Fail", f"{trial['min_fps']:.2f} processed FPS"]
+            if config.webrtc:
+                delivery = trial["webrtc_delivery"]
+                parts.append(f"{delivery['delivered_fps']:.2f} delivered FPS, "
+                             f"{delivery['max_gap_seconds'] * 1000:.0f} ms max gap")
+            if config.eventrec:
+                clips = trial["smart_video"]["clips"]
+                passed = sum(clip["fps_pass"] and clip["continuity_pass"] for clip in clips)
+                parts.append(f"{passed}/{len(clips)} clips passed")
+            cells.append("; ".join(parts))
+        lines.append(f"| {MODEL_NAMES[model]} | `{profile}` | {' | '.join(cells)} |")
+    return "\n".join(lines)
+
+
 def command_summarize(args):
     print(summarize(load(args.results)))
 
@@ -1403,7 +1585,7 @@ def parser():
     probe.add_argument("--profile", default="webrtc+evt-osd")
     probe.set_defaults(run=command_preflight)
 
-    def station(sub):
+    def station(sub, *, matched=False):
         sub.add_argument("--ms3", required=True, help="video-streaming API base URL, e.g. http://MS3:8000")
         sub.add_argument("--device", required=True, help="public hardware/power-mode label, e.g. ex3-orin-nano-8gb-15w")
         sub.add_argument("--ffprobe", default="ffprobe", help="ffprobe executable for Smart Video clip validation")
@@ -1411,6 +1593,17 @@ def parser():
                          "slot (default: --ffprobe)")
         sub.add_argument("--model", required=True, choices=MODELS)
         sub.add_argument("--aip", required=True, help="unique ID of the AIP built for this model")
+        sub.add_argument("--out", required=True,
+                         help="JSON Lines results file; its ledger of undeleted resources is OUT.owned.json")
+        if matched:
+            sub.add_argument("--source", dest="rtsp_template", metavar="RTSP_URL", required=True,
+                             help="the same looped 720p30 RTSP feed on both devices")
+            sub.add_argument("--source-sha256", required=True,
+                             help="SHA-256 of the encoded file in the stream-copy publisher")
+            sub.add_argument("--profile", choices=MATCHED_PROFILES, help="run only this case; default: all matched cases")
+            sub.set_defaults(warmup=WARMUP_SECONDS, window=WINDOW_SECONDS, interval=SAMPLE_SECONDS,
+                             unverified_model=False, camera_tag="720p", containers=",".join(CONTAINERS))
+            return
         sub.add_argument("--unverified-model", action="store_true",
                          help="measure even when the AIP's name and model do not match --model")
         sub.add_argument("--rtsp-template", required=True, help="camera URL with an {index} placeholder")
@@ -1425,8 +1618,6 @@ def parser():
         sub.add_argument("--containers", default=",".join(CONTAINERS),
                          help="containers whose CPU is recorded (empty: none)")
         sub.add_argument("--stage", default="", help="label stored with the results")
-        sub.add_argument("--out", required=True,
-                         help="JSON Lines results file; its ledger of undeleted resources is OUT.owned.json")
 
     search = commands.add_parser("search", help="find the largest passing camera count")
     station(search)
@@ -1436,6 +1627,13 @@ def parser():
     station(fixed)
     fixed.add_argument("--n", type=int, required=True)
     fixed.set_defaults(run=command_fixed)
+    matched = commands.add_parser("matched", help="run the same one-camera pipeline settings on each station")
+    station(matched, matched=True)
+    matched.set_defaults(run=command_matched)
+    paired = commands.add_parser("compare-matched", help="check paired settings and print measured results")
+    paired.add_argument("left", help="first station's matched JSONL")
+    paired.add_argument("right", help="second station's matched JSONL")
+    paired.set_defaults(run=lambda args: print(matched_comparison(load(args.left), load(args.right))))
     summary = commands.add_parser("summarize", help="Markdown tables from a results file")
     summary.add_argument("results")
     summary.set_defaults(run=command_summarize)

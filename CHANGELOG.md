@@ -2,13 +2,17 @@
 
 ## Unreleased
 
+- benchmark: Compare all three models on EX3 and EX5 using one shared 720p30 feed. Publish 33 paired results with matching OSD, WebRTC and Smart Video settings, including bitrate and output-size changes. Report processing, publisher delivery and saved-clip quality separately.
 - benchmark: Publish EX3 camera counts and protocol-v2 one-camera output checks for all three EX5 YOLO flavors. Report processed FPS separately from WebRTC delivery and Smart Video clip quality.
 - chore: Stop tracking the selected flavor's inference config and `config.pbtxt` copies; `tools/flavors.py use` and `bin/build.sh` generate them from `flavors/<id>/`, and the release workflow regenerates them and checks that the committed manifest, store metadata and weights license match
-- docs: Show every recorded result in the comparison notebook as text, so GitHub displays it without running code: accuracy, inference time, live camera counts with and without video outputs, output settings, what was not tested, and when each test ran
-- docs: Add 80-class mAP, inference time and EX5 no-output camera counts to the README results table, with test dates and links to the EX3/EX5 output-qualification matrix
+- docs: Show every recorded result in the comparison notebook as text, so GitHub displays it without running code: accuracy, inference time, live camera counts with and without video outputs, output settings and what was not tested
+- docs: Add 80-class mAP, inference time and EX5 no-output camera counts to the README results table, with links to the EX3/EX5 output-qualification matrix
 - docs: Explain that the three flavors are build recipes for one AI Processor and that the top-level `configs/` and `models/` hold the selected flavor
 - docs: Replace the Mermaid diagrams, which GitHub doesn't render in notebooks, with an SVG pipeline diagram and a one-line build flow
 - test: Generate the published camera, headroom and output-screening tables from `capacity.jsonl` and check that the README and the comparison notebook quote them
+- docs: State one camera-count rule and one set of one-camera output checks in the EX3 and EX5 reports, the EX3/EX5 matrix, the README and the comparison notebook. Both reports now follow the same section order and publish their output checks in one table format; the matrix lists each station's test conditions. EX5 YOLOv10n at 720p is now marked 6†, like EX3 YOLO26n, because seven cameras passed 1 of 2 attempts
+- docs: Remove measurement dates from the public documentation
+- test: Recompute every published camera count and one-camera output row from the evidence files using the shared rule, and check that each document quotes the same rule, output checks and † notes
 
 ## v7.0.0 - 2026-11-17
 
@@ -22,7 +26,7 @@
 - docs!: Replace `localdev.ipynb`, `presentation.ipynb` and `accuracy.ipynb` with `notebooks/`: a presentation, one build notebook per flavor, and a model comparison. Each notebook credits its author
 - docs: Rewrite the README as a short introduction; move the build, measurement and accuracy steps into the notebooks
 - docs: Replace the YOLOv7 reference benchmark with one latency and one accuracy result per flavor in `doc/benchmarks/orin-nx-16gb-jp6.0/`, with a comparison table and chart
-- docs: Remeasure latency on 2026-11-18 with the video pipeline stopped and rebuilt engines; record idle GPU baselines and alternating-engine checks, preserve the previous contention timings, and keep the earlier accuracy evaluation separate
+- docs: Remeasure latency with the video pipeline stopped and rebuilt engines; record idle GPU baselines and alternating-engine checks, preserve the previous contention timings, and keep the earlier accuracy evaluation separate
 - docs: Publish SHA-256-verified v7.0.0 TensorRT FP16 engines for all three model flavors from the Orin NX capacity tests; pin each immutable Hugging Face URL and checksum for release packaging
 - docs: Replace the single-model hero illustration with a multi-model AIP image
 - docs: Remove the conference-specific wording from the notebooks

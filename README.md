@@ -53,25 +53,25 @@ Use these measurements as one input to model selection, then evaluate on your ow
 | Model and build notebook | mAP 50:95, 80 COCO classes (published) | mAP 50:95, car / person / truck | FP16 ms per image (EX5, batch 1) | EX5 cameras, no output | EX3 cameras, no output |
 |---|---:|---:|---:|---:|---:|
 | [YOLOv7-tiny](notebooks/01-build-yolov7.ipynb) | 37.13 (n/a) | 39.41 | 8.4 | 4 | 3 |
-| [YOLOv10n](notebooks/02-build-yolov10.ipynb) | 38.34 (38.5) | 40.54 | 5.5 | 6 | 5 |
+| [YOLOv10n](notebooks/02-build-yolov10.ipynb) | 38.34 (38.5) | 40.54 | 5.5 | 6† | 5 |
 | [YOLO26n](notebooks/03-build-yolo26.ipynb) | 39.92 (40.1) | 40.67 | 5.3 | 7 | 5† |
 
-**Accuracy and inference time** were measured on the EX5 (JetPack 6.0, TensorRT 8.6, FP16 engines) from 17 to 19 November 2026. Accuracy uses all 5,000 COCO val2017 images; the authors' published score is in brackets. Inference time is for one image on an idle GPU, without decoding or tracking.
+† EX5 YOLOv10n: seven 720p cameras passed 1 of 2 attempts. EX3 YOLO26n: six 720p cameras passed 3 of 7 attempts.
+
+**Accuracy and inference time** were measured on the EX5 (JetPack 6.0, TensorRT 8.6, FP16 engines). Accuracy uses all 5,000 COCO val2017 images; the authors' published score is in brackets. Inference time is for one image on an idle GPU, without decoding or tracking.
 
 **Reading batch results:** batch size is the number of images in one inference request, not a camera count. The [comparison lesson](notebooks/04-compare-models.ipynb) explains how to read per-image and whole-request times, and what the results mean for a one-camera pipeline.
 
-**Camera counts** are 720p30 H.264 cameras per pipeline with video output off. A count passed when every camera averaged at least **29 processed FPS** over 120 seconds. The EX5 ran in MAXN power mode on 18 and 19 November 2026; 1080p cameras gave the same counts. The EX3 ran in 15 W mode with JetPack 6.0 on 25 and 26 November 2026; 1080p cameras were not tested.
+**Camera counts** are 720p30 H.264 cameras per pipeline with video output off. Every camera had to average at least **29 processed FPS** over 120 seconds after a 45-second warm-up. A count is reported when it passed at least two attempts, failed none, and the next count failed at least once; † marks a higher count that passed only sometimes. Both stations ran JetPack 6.0 at their highest power mode: MAXN on the EX5 and 15 W on the EX3. On the EX5, 1080p cameras gave the same counts; the EX3 was not tested at 1080p.
 
-The EX3 and EX5 tests used different input scenes, so their camera counts are station-specific results, not a controlled, scene-identical hardware comparison.
+The capacity searches in the table used different scenes. In the [same-camera EX3/EX5 comparison](doc/benchmarks/capacity/matched.md), **both boxes processed about 30 FPS in all 33 cases**. With video output enabled, the EX5 passed 28 of 30 cases and the EX3 passed 2 of 30. Both EX3 passes used a **640×360 WebRTC output** (YOLO26n and YOLOv10n) from the same 720p input. The [test setup](doc/benchmarks/capacity/README.md#matched-one-camera-test) gives the OSD, bitrate and output dimensions for every case. These are output-quality results, not camera limits.
 
-**With video output**, both stations were tested with the same checks for WebRTC streaming, Smart Video event recording, and both together:
+**In the earlier output checks**, both stations used the same pass rules with OSD on, but different scenes:
 
 - **EX5:** all nine one-camera model/profile checks passed. Its multi-camera output limits have not been established.
 - **EX3:** with one camera, detection stayed near 30 FPS for every model, but the delivered video failed frame-rate and/or continuity requirements, so no output profile qualified. See the [EX3 report](doc/benchmarks/orin-nano-8gb-jp6.0/capacity.md) for details.
 
-At six cameras, YOLO26n passed 3 of 7 EX3 attempts; five cameras passed in both runs.
-
-The [comparison notebook](notebooks/04-compare-models.ipynb) explains these results. Device reports give the details for the [EX5](doc/benchmarks/orin-nx-16gb-jp6.0/capacity.md) and the [EX3](doc/benchmarks/orin-nano-8gb-jp6.0/capacity.md); the [EX3/EX5 matrix](doc/benchmarks/capacity/README.md) compares them side by side.
+The [comparison notebook](notebooks/04-compare-models.ipynb) explains these results. Device reports give the details for the [EX5](doc/benchmarks/orin-nx-16gb-jp6.0/capacity.md) and the [EX3](doc/benchmarks/orin-nano-8gb-jp6.0/capacity.md); the [EX3/EX5 matrix](doc/benchmarks/capacity/README.md) lists both with the shared rules and each station's conditions.
 
 ## Prebuilt TensorRT engines
 

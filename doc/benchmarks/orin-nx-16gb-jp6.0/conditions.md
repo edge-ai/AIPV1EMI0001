@@ -1,4 +1,4 @@
-Latency was remeasured on **2026-11-18 with the video pipeline stopped and an idle GPU baseline**. Accuracy was not rerun.
+Latency was measured **with the video pipeline stopped and an idle GPU baseline**. Accuracy and latency use separate engine builds.
 
 ### Device and load
 

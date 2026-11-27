@@ -2,24 +2,28 @@
 
 With video outputs off, one EX5 (Orin NX 16 GB) sustained **7 cameras with
 YOLO26n, 6 with YOLOv10n and 4 with YOLOv7-tiny** at both input resolutions.
-Under protocol v2, all three models also passed one-camera checks for WebRTC,
+In the original one-camera output screen, all three models passed with WebRTC,
 Smart Video and both outputs together. These results establish a one-camera
-lower bound, not multi-camera output limits.
+lower bound, not multi-camera output limits. The separate
+[same-camera comparison](../capacity/matched.md) includes OSD-off, bitrate
+and output-size variants on both stations.
 
 ## Measured no-output limits
-
-The trials ran on 18–19 November 2026.
 
 | Model | 720p30 cameras, no output | 1080p30 cameras, no output |
 |---|---:|---:|
 | YOLO26n | **7** | **7** |
-| YOLOv10n | **6** | **6** |
+| YOLOv10n | **6†** | **6** |
 | YOLOv7-tiny | **4** | **4** |
 
-Each camera averaged at least **29 processed FPS** over 120 seconds after a
-45-second warm-up, with no reconnects or inference stalls. Each reported count
-passed at least twice and the next count failed. YOLOv10n passed once at seven
-720p cameras and failed a recheck, so the reported limit is six.
+Every camera must average at least 29 processed FPS over 120 seconds after a
+45-second warm-up, with no reconnects or inference stalls. A count is reported
+when it passed at least two attempts and failed none, every lower count tested
+also passed, and at least one attempt at the next count failed. † means a
+higher count passed in some attempts and failed in others; the table keeps the
+lower count.
+
+† YOLOv10n: seven 720p cameras passed 1 of 2 attempts.
 
 These are near-real-time experimental limits for one pipeline, not guarantees
 of lossless 30 FPS. Do not divide idle inference throughput by 30 to infer a
@@ -27,37 +31,46 @@ camera limit.
 
 ## Protocol v2: one-camera output checks
 
-On 26 November 2026, each model passed all three 720p30 output profiles at one
-camera. Every profile averaged at least 29 processed FPS during the 120-second
-sample after a 45-second warm-up.
+Each model passed all three output profiles at one camera. Every run averaged
+at least 29 processed FPS during the 120-second sample after a 45-second
+warm-up, and the delivered video passed every check.
 
-| Model | Profile | Processed FPS (minimum) | WebRTC publisher | Smart Video clips |
-|---|---|---:|---|---|
-| YOLO26n | WebRTC | 30.15 | 30.00 FPS; 33 ms maximum gap | — |
-| YOLO26n | Smart Video | 30.01 | — | 4/4 H.264 clips at 30.00 FPS; keyframe start; 33 ms maximum gap |
-| YOLO26n | WebRTC + Smart Video | 30.15 | 30.00 FPS; 33 ms maximum gap | 4/4 H.264 clips at 30.00 FPS; keyframe start; 33 ms maximum gap |
-| YOLOv10n | WebRTC | 30.15 | 30.00 FPS; 33 ms maximum gap | — |
-| YOLOv10n | Smart Video | 30.12 | — | 4/4 H.264 clips at 30.00 FPS; keyframe start; 33 ms maximum gap |
-| YOLOv10n | WebRTC + Smart Video | 30.14 | 30.00 FPS; 33 ms maximum gap | 4/4 H.264 clips at 30.00 FPS; keyframe start; 33 ms maximum gap |
-| YOLOv7-tiny | WebRTC | 30.14 | 30.00 FPS; 33 ms maximum gap | — |
-| YOLOv7-tiny | Smart Video | 30.14 | — | 4/4 H.264 clips at 30.00 FPS; keyframe start; 33 ms maximum gap |
-| YOLOv7-tiny | WebRTC + Smart Video | 30.14 | 30.00 FPS; 33 ms maximum gap | 4/4 H.264 clips at 30.00 FPS; keyframe start; 33 ms maximum gap |
+WebRTC must deliver at least 29 FPS, measured at the publisher for the first 20
+seconds of sampling. Every Smart Video clip must be H.264 at the mosaic size,
+last 9 seconds (±2 seconds), decode at 29 FPS or more and start on a keyframe.
+Neither output may have a packet gap over 100 ms (plus 5 ms timing tolerance).
 
-Each publisher was measured for 20 seconds; each of the 24 saved clips was
-checked for H.264 decoding, at least 29 FPS, a keyframe start and packet gaps
-within the protocol limit. The EX5 checks used a 720p30 tollgate RTSP source.
-The [EX3 checks](../orin-nano-8gb-jp6.0/capacity.md) used a different repeated
-street source, so the scenes were not matched. Multi-camera output limits were
-not established.
+| Model | Profile | Runs | Processed FPS (minimum) | WebRTC publisher | Smart Video clips | Result |
+|---|---|---:|---:|---|---|---|
+| YOLO26n | WebRTC | 1 | 30.15 | 30.00 FPS; 33 ms maximum gap | — | Passed |
+| YOLO26n | Smart Video | 1 | 30.01 | — | 4/4 at 29+ FPS (30.00); 4/4 keyframe starts; 33 ms maximum gap | Passed |
+| YOLO26n | WebRTC + Smart Video | 1 | 30.15 | 30.00 FPS; 33 ms maximum gap | 4/4 at 29+ FPS (30.00); 4/4 keyframe starts; 33 ms maximum gap | Passed |
+| YOLOv10n | WebRTC | 1 | 30.15 | 30.00 FPS; 33 ms maximum gap | — | Passed |
+| YOLOv10n | Smart Video | 1 | 30.12 | — | 4/4 at 29+ FPS (30.00); 4/4 keyframe starts; 33 ms maximum gap | Passed |
+| YOLOv10n | WebRTC + Smart Video | 1 | 30.14 | 30.00 FPS; 33 ms maximum gap | 4/4 at 29+ FPS (30.00); 4/4 keyframe starts; 33 ms maximum gap | Passed |
+| YOLOv7-tiny | WebRTC | 1 | 30.14 | 30.00 FPS; 33 ms maximum gap | — | Passed |
+| YOLOv7-tiny | Smart Video | 1 | 30.14 | — | 4/4 at 29+ FPS (30.00); 4/4 keyframe starts; 33 ms maximum gap | Passed |
+| YOLOv7-tiny | WebRTC + Smart Video | 1 | 30.14 | 30.00 FPS; 33 ms maximum gap | 4/4 at 29+ FPS (30.00); 4/4 keyframe starts; 33 ms maximum gap | Passed |
 
-## Historical output screening (protocol v1)
+Each profile ran once with one 720p30 tollgate RTSP camera. Output profiles
+enable the on-screen display (OSD). The [EX3 checks](../orin-nano-8gb-jp6.0/capacity.md)
+ran each profile twice with a repeated street clip, so the scenes were not
+matched. Multi-camera output limits were not established.
+
+The WebRTC check reads the publisher's stream from MediaMTX over RTSP; it is
+**not browser playback**. This screen had no browser viewer and did not vary
+the output resolution, target frame rate or bitrate. The
+[matched EX3/EX5 results](../capacity/matched.md) show what happens when
+both stations use the same input video and output settings.
+
+## Earlier measurements (protocol v1)
 
 With the WebRTC publisher enabled, YOLO26n processed seven 720p inputs. The
 slowest camera averaged 30.45 processed FPS without OSD and 30.23 with OSD.
 These are **input processing rates**, not the frame rate delivered by the
 publisher. No browser viewer was connected.
 
-The historical event-recording trials enabled the buffer and sent triggers but
+The earlier event-recording trials enabled the buffer and sent triggers but
 did not verify clip integrity or duration. They do not establish a Smart Video
 camera count under the [EX3/EX5 output checks](../capacity/README.md).
 
@@ -76,12 +89,19 @@ The diagnostics did not establish the cause of the one-camera failures.
 
 ## Test conditions
 
-The no-output trials used Orin NX 16 GB, MAXN power mode, JetPack
-6.0 / L4T R36.3, DeepStream 7.0 and TensorRT 8.6.2.3.
+The trials used Orin NX 16 GB in MAXN power mode, the highest mode L4T R36.3
+offers on this module, with JetPack 6.0 / L4T R36.3, DeepStream 7.0 and
+TensorRT 8.6.2.3.
 Engines were FP16-enabled, 640x640, with batch size
 `min(cameras, 8)`; NvDCF tracking was on, ROI/LCC analytics off, and inference
 ran on every frame. TCP RTSP cameras looped staggered copies of one street
-clip. Node-RED and WebSocket metadata outputs remained on.
+clip at 720p30 and 1080p30. Node-RED and WebSocket metadata outputs remained on.
+
+The EX5 encodes output video in hardware. The one-camera records show a
+1280×720 mosaic with OSD on and a 2 Mbps target when WebRTC was enabled.
+Smart Video requested 3 seconds before and 6 seconds after the trigger,
+with a 10-second buffer and 30 seconds between triggers. The `bitrate`
+field in `output_settings` is the WebRTC setting, not the Smart Video bitrate.
 
 The isolated test AIPs were version 7.0.0, built on this target with min/opt/max
 batch 1/8/8. FP16 is enabled, not forced for every layer; YOLOv7-tiny includes
@@ -101,7 +121,7 @@ These EX5 engines must be rebuilt or independently validated on another GPU.
 The no-output tests used repeated copies of one street scene; the v2 output
 checks used one tollgate scene at one camera. No viewer fan-out, varied/busy
 scenes, long thermal soak, multi-camera output limit or multi-pipeline load was
-qualified. Junction temperature reached 85.8 °C in the historical no-output
+qualified. Junction temperature reached 85.8 °C in the no-output
 trials; those tests did not isolate temperature as a cause of the mixed
 YOLOv10n results at seven cameras.
 
