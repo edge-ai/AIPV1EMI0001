@@ -4,6 +4,7 @@ import re
 import sys
 import tempfile
 import unittest
+from copy import deepcopy
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -18,6 +19,22 @@ from public_reference import assert_no_private_references  # noqa: E402
 
 
 class CapacityProfileTests(unittest.TestCase):
+    def test_matched_stream_identity_requires_a_hash_and_exact_input_format(self):
+        uri, digest = "rtsp://VCAM:PORT/source", "a" * 64
+        with mock.patch.object(capacity.subprocess, "run") as probe:
+            with self.assertRaisesRegex(capacity.CapacityError, "SHA-256"):
+                capacity.matched_source("ffprobe", uri, "same-scene")
+            probe.assert_not_called()
+            for stream in (capacity.MATCHED_INPUT, {**capacity.MATCHED_INPUT, "avg_frame_rate": "30000/1001"},
+                           {**capacity.MATCHED_INPUT, "width": 640}):
+                probe.return_value.stdout = json.dumps({"streams": [stream]})
+                if stream == capacity.MATCHED_INPUT:
+                    self.assertEqual(capacity.matched_source("ffprobe", uri, digest),
+                                     {"file_sha256": digest, **stream})
+                else:
+                    with self.assertRaisesRegex(capacity.CapacityError, "1280x720 at 30"):
+                        capacity.matched_source("ffprobe", uri, digest)
+
     def test_profile_names_round_trip_and_irrelevant_settings_normalize(self):
         names = {
             "base", "rec", "webrtc", "webrtc-osd", "hls-osd", "evt-osd",
@@ -253,6 +270,7 @@ class FakeStation:
             pipeline = body["pipeline"]
             pk = self.add("pipelines", pipeline["name"])
             self.pipelines[pk]["inputs"] = len(pipeline["inputs"])
+            self.pipelines[pk]["setup"] = pipeline
             return 201, {"pk": pk}
         if (method, path) == ("POST", "/pipeline/records/deletion"):
             self.records.pop(query["pipeline_uuid"], None)
@@ -286,6 +304,15 @@ class FakeStation:
             return 404, "no such pipeline"
         action = match.group(2) or ""
         inputs = pipeline["inputs"]
+        if method == "GET" and not action:
+            setup = pipeline["setup"]
+            return 200, {**{k.removesuffix("_setup") + "_settings": v for k, v in setup.items()
+                            if k.endswith("_setup")},
+                         "ai_processor_settings": {"ai_processor": {"pk": setup["ai_processor_setup"]["uuid"]},
+                                                   "config": setup["ai_processor_setup"]},
+                         "input_sources": [{"media": {"pk": i["media_uuid"]},
+                                            "media_settings": i["media_setup"], "analytic_settings": None}
+                                           for i in setup["inputs"]]}
         if method == "DELETE" and not action:
             del self.pipelines[match.group(1)]
             return 200, None
@@ -331,6 +358,49 @@ class CapacitySessionTests(unittest.TestCase):
         return capacity.Session(self.station, FakeStation.AIP, "yolo26", self.ledger, signaling=self.station,
                                 run="run1", warmup=0, window=0.03, interval=0.01, containers=(),
                                 log=self.log.append, **options)
+
+    def test_matched_trial_verifies_readback_before_start_and_probes_the_requested_output(self):
+        session = self.session()
+        session.create_media("rtsp://VCAM:PORT/source", 1, "720p")
+        config = capacity.parse_profile("webrtc-osd-4M-640x360")
+        source = {"file_sha256": "a" * 64, **capacity.MATCHED_INPUT}
+        trial = session.trial(1, config, source=source)
+        self.assertTrue(trial["pass"], trial["reasons"])
+        self.assertEqual(trial["matched_setup"]["source"], source)
+        setup = trial["matched_setup"]["pipeline"]
+        self.assertEqual(setup["tiler"], {"width": 640, "height": 360})
+        self.assertTrue(setup["osd"]["active"])
+        self.assertEqual(setup["mtx_output_sink"]["webrtc_bitrate"], 4_000_000)
+        self.assertIn({"stream_index": 2, "bitrate": 4_000_000},
+                      [query for _, path, query in self.station.calls if path.endswith("/mtx/start")])
+        self.assertEqual(self.finish_webrtc_probe.call_args.kwargs["tiler"], (640, 360))
+
+        original = self.station.respond
+
+        def wrong_bitrate(method, path, body, form):
+            status, payload = original(method, path, body, form)
+            if method == "GET" and isinstance(payload, dict) and "mtx_output_sink_settings" in payload:
+                payload["mtx_output_sink_settings"] = {**payload["mtx_output_sink_settings"], "webrtc_bitrate": 2_000_000}
+            return status, payload
+
+        with mock.patch.object(self.station, "respond", side_effect=wrong_bitrate):
+            rejected = session.trial(1, config, source=source)
+        self.assertIn("webrtc_bitrate", rejected["error"])
+        self.assertEqual(sum(path.endswith("/mtx/start") for _, path, _ in self.station.calls), 1)
+        self.assertFalse(self.station.pipelines)
+
+    def test_matched_command_does_not_save_a_passing_trial_if_camera_cleanup_fails(self):
+        context = mock.MagicMock()
+        context.__enter__.return_value.trial.return_value = {"pass": True}
+        context.__exit__.side_effect = capacity.CapacityError("cleanup incomplete")
+        args = capacity.parser().parse_args(["matched", "--ms3", "http://ms3", "--device", "ex3",
+            "--model", "yolo26", "--aip", "test", "--source", "rtsp://vcam/source",
+            "--source-sha256", "a" * 64, "--profile", "base", "--out", "not-written"])
+        with mock.patch.object(capacity, "matched_source"), mock.patch.object(capacity, "open_session",
+                return_value=context), mock.patch.object(capacity, "append") as append:
+            with self.assertRaisesRegex(capacity.CapacityError, "cleanup incomplete"):
+                capacity.command_matched(args)
+            append.assert_not_called()
 
     def test_session_creates_run_scoped_media_refuses_existing_ones_and_deletes_its_own(self):
         foreign = self.station.add("media", "cap-run1-1080p-02")
@@ -678,6 +748,14 @@ def packets(count, *, skip=(), fps=30):
 
 
 class SmartVideoProbeTests(unittest.TestCase):
+    def test_matched_webrtc_rejects_the_wrong_mosaic_even_at_full_rate(self):
+        process = mock.Mock(returncode=0)
+        process.communicate.return_value = (json.dumps({"packets": packets(601),
+            "streams": [{"codec_name": "h264", "width": 1280, "height": 720}]}), "")
+        with self.assertRaisesRegex(capacity.CapacityError, "640x360"):
+            capacity.finish_webrtc_probe(process, tiler=(640, 360))
+        self.assertTrue(capacity.finish_webrtc_probe(process, tiler=(1280, 720))["pass"])
+
     def test_packet_continuity_reports_the_issue_964_gap_and_a_non_keyframe_start(self):
         whole = capacity.packet_continuity(packets(270))
         self.assertTrue(whole["first_packet_keyframe"])
@@ -732,6 +810,44 @@ class SmartVideoProbeTests(unittest.TestCase):
 
 
 class CapacityPlanTests(unittest.TestCase):
+    def test_paired_results_reject_changed_source_settings_and_missing_cases(self):
+        config = capacity.parse_profile("webrtc-osd-1M")
+        pipeline = capacity.pipeline_setup("test", config, {"pk": "one"}, ["cam1"], matched=True)["pipeline"]
+        setup = {"source": {"file_sha256": "a" * 64, **capacity.MATCHED_INPUT},
+                 "pipeline": capacity.matched_parameters(pipeline)}
+        left = {"kind": "fixed", "stage": "matched-one-camera", "model": "yolo26", "profile": config.name,
+                "protocol": capacity.PROTOCOL, "device": "EX3", "model_verified": True, "aip": {"version": "7.0.0"},
+                "trial": {"n": 1, "pass": False, "min_fps": 30, "warmup_seconds": 45, "window_seconds": 120,
+                          "interval_seconds": 5, "matched_setup": setup,
+                          "webrtc_delivery": {"codec": "h264", "width": 1280, "height": 720,
+                                              "delivered_fps": 27, "max_gap_seconds": 0.133}}}
+        right = deepcopy(left)
+        right["device"] = "EX5"
+        self.assertIn("Fail; 30.00 processed FPS; 27.00 delivered FPS", capacity.matched_comparison([left], [right]))
+        for field, value in (("file_sha256", "b" * 64), ("file_sha256", None)):
+            changed = deepcopy(right)
+            changed["trial"]["matched_setup"]["source"][field] = value
+            with self.assertRaisesRegex(capacity.CapacityError, "source"):
+                capacity.matched_comparison([left], [changed])
+        for section, key, value in (("mtx_output_sink", "webrtc_bitrate", 4_000_000),
+                                    ("osd", "active", False), ("tiler", "width", 640)):
+            changed = deepcopy(right)
+            changed["trial"]["matched_setup"]["pipeline"][section][key] = value
+            with self.assertRaisesRegex(capacity.CapacityError, "settings"):
+                capacity.matched_comparison([left], [changed])
+        for delivery in ({}, {**left["trial"]["webrtc_delivery"], "width": 640}):
+            changed = deepcopy(right)
+            changed["trial"]["webrtc_delivery"] = delivery
+            with self.assertRaisesRegex(capacity.CapacityError, "outputs|format"):
+                capacity.matched_comparison([left], [changed])
+        changed = {**right, "aip": {"version": "7.0.1"}}
+        with self.assertRaisesRegex(capacity.CapacityError, "AIP version"):
+            capacity.matched_comparison([left], [changed])
+        with self.assertRaisesRegex(capacity.CapacityError, "version changed"):
+            capacity.matched_comparison([left], [right, {**changed, "profile": "webrtc-osd-4M"}])
+        with self.assertRaisesRegex(capacity.CapacityError, "same model/profile cases"):
+            capacity.matched_comparison([left], [{**right, "model": "yolov7"}])
+
     def test_model_names_match_flavors_and_identify_the_aip(self):
         for flavor_id in flavors.flavor_ids(ROOT):
             with self.subTest(flavor=flavor_id):
@@ -787,7 +903,7 @@ class CapacityPlanTests(unittest.TestCase):
         ]
         text = capacity.summarize(records)
         self.assertIn("| yolo26 | AIPV1EMI9026 1.0.0 | 6†", text)
-        self.assertIn("A higher count passed in at least one trial but failed in another", text)
+        self.assertIn("A higher count passed in some attempts and failed in others.", text)
         self.assertIn("| 6 | 29.10 | invalid |", text)
         self.assertIn("Excluded 1 invalid trial", text)
 
@@ -804,7 +920,7 @@ class CapacityPlanTests(unittest.TestCase):
         self.assertIn("| Model | 720p, no output | 720p, WebRTC + Smart Video recording + OSD | 1080p, no output |",
                       table)
         self.assertIn("| YOLO26n | 6† | 6 | - |", table)
-        self.assertIn("† A higher count passed in one trial and failed in another", table)
+        self.assertIn("† A higher count passed in some attempts and failed in others; the table keeps the lower count.", table)
         headroom = capacity.headroom_table(records, ("yolo26",), profiles=("base", "webrtc+evt-osd"))
         self.assertIn("| YOLO26n | 7 | 29.20 (passed), 28.80 | 27.50 |", headroom)
         with self.assertRaises(capacity.CapacityError):
